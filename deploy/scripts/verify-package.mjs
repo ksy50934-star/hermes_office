@@ -61,8 +61,11 @@ const forbiddenPaths = [
   /(?:^|\/)(?:reservation_sources|google_office_readonly_token|google_reservation_oauth_token|google_client_secret)\.json$/,
   /\.(?:sqlite|sqlite-wal|sqlite-shm|db|pem|key)$/i,
 ];
+// Contract documents, not secrets. They hold placeholders only, and the secret
+// scan below still applies to them.
+const environmentExamples = new Set([".env.example", ".env.cloud.example"]);
 for (const file of files) {
-  if (file === ".env.example") continue;
+  if (environmentExamples.has(file)) continue;
   if (legacyBrandPattern.test(file)) fail(`legacy brand identifier found in path: ${file}`);
   if (forbiddenPaths.some((pattern) => pattern.test(file))) fail(`runtime secret or data path is tracked: ${file}`);
 }

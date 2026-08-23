@@ -797,7 +797,7 @@
 }
 
 @media (max-width: 640px) {
-  .mobile-dock { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; }
+  .mobile-dock { grid-template-columns: repeat(7, minmax(0, 1fr)) !important; }
   .data-room-shell { height: calc(100dvh - 70px - var(--mobile-dock-height)); padding-bottom: env(safe-area-inset-bottom); }
   .data-room-title strong { font-size: 18px; }
   .data-room-search { grid-template-columns: 1fr; }
@@ -2404,6 +2404,20 @@ button:focus-visible { outline: 3px solid #f0a17f; outline-offset: 3px; }
 
 .brand-lockup { display: flex; align-items: center; gap: 11px; padding: 0 7px 30px; }
 .brand-lockup img { width: 39px; height: 39px; }
+/* Shown only when the mark asset fails to load, so the lockup never leaves a
+   broken-image box in the navigation. */
+.brand-lockup-fallback {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 39px;
+  flex: 0 0 39px;
+  border-radius: 11px;
+  background: #17372f;
+  color: #f3eadc;
+  font: 700 14px IBM Plex Mono;
+  letter-spacing: .04em;
+}
 .brand-lockup div { display: flex; flex-direction: column; }
 .brand-lockup strong { font: 600 14px IBM Plex Mono; letter-spacing: .11em; }
 .brand-lockup span { margin-top: 2px; color: #a9bcb4; font: 10px IBM Plex Mono; letter-spacing: .18em; }

@@ -6,6 +6,7 @@ import "./styles.css";
 import "./organizationB1.css";
 import "./officeMap.css";
 import "./systemPro.css";
+import "./bibiWorkspace.css";
 import App from "./App.jsx";
 import { migrateNamespacedStorage } from "./storageMigration.js";
 

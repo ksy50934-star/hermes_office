@@ -19,3 +19,25 @@ backups/
 *oauth_token*.json
 *client_secret*.json
 reservation_sources.json
+.vercel
+.env*
+# The broad .env* rule above re-ignores the example files, so the negations have
+# to come after it. These two are contract documents, not secrets.
+!.env.example
+!.env.cloud.example
+
+# Cloud workspace environment (never commit the filled-in file).
+.env.cloud
+
+# OMC runtime state (operational artifacts, not source).
+.omc/
+
+# Local QA harness and external runtime status artifacts. They are produced by
+# tooling outside this package and must never be committed or uploaded.
+.bibi-measure.mjs
+.hermes-overnight-status.json
+
+# Supabase CLI project-linkage metadata. Local-only: it names the linked project
+# and the pooler host, so it must never be committed. Already excluded from the
+# Vercel upload by .vercelignore.
+supabase/.temp/

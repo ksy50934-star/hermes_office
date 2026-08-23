@@ -10,9 +10,10 @@
     "check": "eslint .",
     "test": "node --test tests/*.test.js",
     "verify:package": "node deploy/scripts/verify-package.mjs",
-    "verify": "npm run check && npm test && npm run build && npm run verify:package"
+    "verify": "npm run check && npm run build && npm test && npm run verify:package"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "@vitejs/plugin-react": "latest",
     "@xterm/addon-fit": "latest",
     "@xterm/xterm": "latest",

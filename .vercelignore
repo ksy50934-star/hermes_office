@@ -1,0 +1,44 @@
+# Files excluded from the Vercel deployment upload.
+#
+# This mirrors the security-critical .gitignore rules so that a CLI deployment
+# (which uploads the working directory, not the git index) can never carry a
+# secret or a local artifact, and adds the local-only files that are not part of
+# the deployable package. It excludes nothing the Vite build or the api/
+# functions need.
+
+# Build inputs Vercel regenerates or never needs.
+node_modules/
+dist/
+dev-dist/
+build/
+release/
+.deploy_tmp/
+.vercel
+.omc/
+*.log
+
+# Secrets and runtime data.
+.env
+.env.*
+!.env.example
+!.env.cloud.example
+.env.cloud
+deploy/secrets/
+backups/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.pem
+*.key
+*oauth_token*.json
+*client_secret*.json
+reservation_sources.json
+
+# Local QA harness and external runtime status artifacts.
+.bibi-measure.mjs
+.hermes-overnight-status.json
+
+# Supabase CLI project-linkage metadata. Local-only, and it names the linked
+# project and pooler host.
+supabase/.temp/

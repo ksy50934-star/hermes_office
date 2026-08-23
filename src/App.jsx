@@ -1,4 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import BibiWorkspace from "./BibiWorkspace.jsx";
+import { isBibiSurface } from "./bibi/surface.js";
 import CommandCenter from "./CommandCenter.jsx";
 import DataRoom from "./DataRoom.jsx";
 import HermesOffice from "./HermesOffice.jsx";
@@ -28,7 +30,7 @@ import {
 } from "./officialContracts.js";
 import { useModalFocus } from "./useModalFocus.js";
 import { buildDefaultOrganizationNodes, organizationRoomAssignments, validateOrganizationNodes } from "../organizationHierarchy.js";
-import { OFFICE_BRAND_MARK, OFFICE_WORKSPACE_LABEL } from "./branding.js";
+import { OFFICE_BRAND_MARK, OFFICE_BRAND_MARK_SRC, OFFICE_WORKSPACE_LABEL } from "./branding.js";
 import {
   hydrateActiveMeetings,
   isMeetingArchiveDue,
@@ -40,6 +42,14 @@ import {
 const HermesDashboard = lazy(() => import("./HermesDashboard.jsx"));
 
 const NAV_GROUPS = [
+  {
+    // bibi-01 leads the navigation because the CEO is the governing surface of
+    // this workspace, not one destination among several.
+    label: "BIBI",
+    items: [
+      ["ceo", "CEO비비", "01"],
+    ],
+  },
   {
     label: "WORKSPACE",
     items: [
@@ -72,12 +82,12 @@ const VIEW_IDS = new Set(NAV_GROUPS.flatMap((group) => group.items.map(([id]) =>
 
 function initialViewFromUrl() {
   const viewParam = new URLSearchParams(window.location.search).get("view");
-  return VIEW_IDS.has(viewParam) ? viewParam : "office";
+  return VIEW_IDS.has(viewParam) ? viewParam : "ceo";
 }
 
 function syncViewUrl(view) {
   const url = new URL(window.location.href);
-  if (view === "office") url.searchParams.delete("view");
+  if (view === "ceo") url.searchParams.delete("view");
   else url.searchParams.set("view", view);
   const next = `${url.pathname}${url.search}${url.hash}`;
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -85,6 +95,7 @@ function syncViewUrl(view) {
 }
 
 const MOBILE_TABS = [
+  ["ceo", "CEO", "01"],
   ["office", "오피스", "OF"],
   ["chat", "대화", "CH"],
   ["meeting", "회의", "MT"],
@@ -1352,6 +1363,30 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
   );
 }
 
+/**
+ * The sidebar brand lockup.
+ *
+ * The mark is an optional decoration, so a missing or unservable asset must not
+ * leave a broken-image box in the navigation. If the image fails to decode the
+ * lockup swaps in the text mark, which needs no network at all.
+ */
+function BrandLockup() {
+  const [markBroken, setMarkBroken] = useState(false);
+  return (
+    <div className="brand-lockup">
+      {markBroken ? (
+        <span className="brand-lockup-fallback" aria-hidden="true">{OFFICE_BRAND_MARK.slice(0, 2)}</span>
+      ) : (
+        <img src={OFFICE_BRAND_MARK_SRC} alt="" onError={() => setMarkBroken(true)} />
+      )}
+      <div>
+        <strong>{OFFICE_BRAND_MARK}</strong>
+        <span>AI OFFICE</span>
+      </div>
+    </div>
+  );
+}
+
 function OfficeApp() {
   const [view, setView] = useState(initialViewFromUrl);
   const [workspace, setWorkspace] = useState(() => loadCachedWorkspace());
@@ -1386,7 +1421,22 @@ function OfficeApp() {
   const [localNotification, setLocalNotification] = useState(null);
   const notificationTimerRef = useRef(0);
 
+  // The Bibi Workspace reports its own connector and cloud health, so a failing
+  // legacy Hermes poll must not raise a banner over it. `refresh` is a stable
+  // callback on a 30s timer, so it reads the active surface from a ref rather
+  // than closing over `view` and resubscribing on every navigation.
+  const bibiSurfaceRef = useRef(isBibiSurface(view));
+  useEffect(() => {
+    bibiSurfaceRef.current = isBibiSurface(view);
+  }, [view]);
+
   const refresh = useCallback(async () => {
+    // Connection state is still tracked while the Bibi surface is open; only the
+    // legacy error text is withheld, so other views stay honest on return.
+    const reportError = (message) => {
+      if (bibiSurfaceRef.current) return;
+      setError(message);
+    };
     try {
       setError("");
       const nextWorkspace = await loadWorkspace();
@@ -1397,10 +1447,10 @@ function OfficeApp() {
         setMissions(officeMissionsFromBoard(board));
       } catch (boardError) {
         setMissions([]);
-        setError(`Hermes 업무 보드를 불러오지 못했습니다. (${boardError.message})`);
+        reportError(`Hermes 업무 보드를 불러오지 못했습니다. (${boardError.message})`);
       }
     } catch (loadError) {
-      setError(loadError.message);
+      reportError(loadError.message);
       setConnection("offline");
     }
   }, []);
@@ -1428,6 +1478,7 @@ function OfficeApp() {
   }, []);
 
   const officeNotice = view === "office" && /승인|보류|검토|요청/.test(error);
+  const bibiSurface = isBibiSurface(view);
 
   useEffect(() => {
     if (!officeNotice) return undefined;
@@ -1952,13 +2003,7 @@ function OfficeApp() {
         tabIndex={mobileNav ? -1 : undefined}
       >
         <button type="button" className="sidebar-close" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}>×</button>
-        <div className="brand-lockup">
-          <img src="/hermes-mark.svg" alt="" />
-          <div>
-            <strong>{OFFICE_BRAND_MARK}</strong>
-            <span>AI OFFICE</span>
-          </div>
-        </div>
+        <BrandLockup />
         <nav aria-label="주요 메뉴">
           {NAV_GROUPS.map((group) => (
             <section key={group.label} className="nav-group">
@@ -2022,7 +2067,12 @@ function OfficeApp() {
                 <span>{activeChatDetail}</span>
               </button>
             )}
-            <span className="topbar-signal"><i />{profiles.filter((profile) => profile.gateway_running).length}명 온라인</span>
+            {/* Gateway online count and the workspace refresh both describe the
+                legacy Hermes backend. The Bibi Workspace has its own connector
+                badge, so this chrome would only contradict it there. */}
+            {!bibiSurface && (
+              <span className="topbar-signal"><i />{profiles.filter((profile) => profile.gateway_running).length}명 온라인</span>
+            )}
             {activeMeetings.length > 0 && <button className="meeting-jump" type="button" onClick={() => navigate("meeting")}>진행 중 회의 {activeMeetings.length}</button>}
             <span>
               {new Intl.DateTimeFormat("ko", {
@@ -2031,11 +2081,11 @@ function OfficeApp() {
                 weekday: "short",
               }).format(new Date())}
             </span>
-            <button type="button" onClick={refresh}>새로고침</button>
+            {!bibiSurface && <button type="button" onClick={refresh}>새로고침</button>}
           </div>
         </header>
 
-        {error && !officeNotice && (
+        {error && !officeNotice && !bibiSurface && (
           <div className={`error-banner ${error.includes("승인") || error.includes("보류") ? "notice" : ""}`}>
             <span>{error}</span>
             <button type="button" onClick={() => setError("")}>닫기</button>
@@ -2049,6 +2099,8 @@ function OfficeApp() {
             <button type="button" onClick={() => setError("")}>닫기</button>
           </div>
         )}
+
+        {view === "ceo" && <BibiWorkspace />}
 
         {view === "command" && (
           <CommandCenter
@@ -2167,6 +2219,10 @@ function OfficeApp() {
               onActivityChange={updateAgentActivity}
               onStartMeeting={startMeeting}
               onGovernanceApprovalRequest={addGovernanceApproval}
+              // This runtime stays mounted behind every view. The Bibi surface
+              // is served without a Hermes gateway, so its legacy WebSocket
+              // ticket must not be minted while that surface is the active one.
+              legacyRealtime={!bibiSurface}
             />
         </section>
 

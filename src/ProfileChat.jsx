@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HermesGateway } from "./gateway.js";
+import { startLegacyRealtime } from "./legacyRealtime.js";
 import { LiveScreenModal, LiveScreenPanel } from "./LiveScreen.jsx";
 import {
   archiveChatSession,
@@ -602,6 +603,9 @@ export default function ProfileChat({
   compact = false,
   onActivityChange,
   onStartMeeting,
+  // The chat runtime is mounted on every view, so the caller — not this
+  // component — decides whether the legacy Hermes Gateway may be opened.
+  legacyRealtime = true,
 }) {
   const [activeProfile, setActiveProfile] = useState(initialProfile);
   const [threads, setThreads] = useState({});
@@ -1163,7 +1167,7 @@ export default function ProfileChat({
     let reconnectTimer = 0;
     let reconnectAttempts = 0;
     const scheduleReconnect = () => {
-      if (stopped) return;
+      if (stopped || !legacyRealtime) return;
       window.clearTimeout(reconnectTimer);
       const delay = Math.min(12000, 1200 * (reconnectAttempts + 1));
       reconnectTimer = window.setTimeout(() => {
@@ -1497,25 +1501,26 @@ export default function ProfileChat({
         updateThread(profileName, (current) => ({ ...current, pendingRequest: null, error: payload.message ?? "Hermes 처리 중 오류가 발생했습니다.", running: false, finishedAt: Date.now() }));
       }
     });
-    gateway.connect().catch((error) => {
-      setConnection("error");
-      updateThread("default", (current) => requestFailureThread(current, error));
-      scheduleReconnect();
+    const stopRealtime = startLegacyRealtime({
+      enabled: legacyRealtime,
+      gateway,
+      onConnectFailure: (error) => {
+        setConnection("error");
+        updateThread("default", (current) => requestFailureThread(current, error));
+        scheduleReconnect();
+      },
+      reconnect: scheduleReconnect,
     });
-    const reconnectNow = () => scheduleReconnect();
-    window.addEventListener("online", reconnectNow);
-    document.addEventListener("visibilitychange", reconnectNow);
     return () => {
       stopped = true;
       window.clearTimeout(reconnectTimer);
-      window.removeEventListener("online", reconnectNow);
-      document.removeEventListener("visibilitychange", reconnectNow);
+      stopRealtime();
       removeState();
       removeReconnectState();
       removeEvent();
       gateway.close();
     };
-  }, [onActivityChange, onStartMeeting, refreshFiles, refreshSessions, updateThread]);
+  }, [legacyRealtime, onActivityChange, onStartMeeting, refreshFiles, refreshSessions, updateThread]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

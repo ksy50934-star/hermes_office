@@ -1,0 +1,583 @@
+/* CEO-first workspace surface. */
+
+/* Stated locally rather than inherited: every width below is a border box, so a
+   padded card or field can be given a percentage width and still fit. */
+.bibi-workspace,
+.bibi-workspace *,
+.bibi-workspace *::before,
+.bibi-workspace *::after {
+  box-sizing: border-box;
+}
+
+.bibi-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  min-height: 100%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--ink, #1d2320);
+}
+
+/* Flex and grid items default to min-width:auto, which lets one long word or a
+   wide <pre> push the whole surface past the viewport. Nothing here is allowed
+   to do that. */
+.bibi-workspace > *,
+.bibi-layout > *,
+.bibi-side > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bibi-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bibi-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
+}
+
+.bibi-header p {
+  margin: 4px 0 0;
+  opacity: 0.75;
+  font-size: 0.9rem;
+}
+
+.bibi-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ---------------------------------------------------------------- warnings */
+
+.bibi-warning {
+  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+}
+
+.bibi-warning.is-blocking {
+  background: #fdf0ec;
+  border-color: #e0836b;
+}
+
+.bibi-warning.is-advisory {
+  background: #fbf6e8;
+  border-color: #d9c07c;
+}
+
+.bibi-warning h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.bibi-warning-summary {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+.bibi-warning ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.bibi-warning-remedy {
+  display: block;
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------ roster */
+
+.bibi-roster {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.bibi-roster-title {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  justify-content: space-between;
+  opacity: 0.7;
+}
+
+.bibi-roster ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.bibi-roster-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "id name"
+    "role role"
+    "badge badge";
+  gap: 2px 8px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bibi-roster-item:hover,
+.bibi-roster-item:focus-visible {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.bibi-roster-item.is-active {
+  border-color: #7a9f8e;
+  background: rgba(122, 159, 142, 0.14);
+}
+
+/* bibi-01 is the governing surface, so it reads as the anchor of the list. */
+.bibi-roster-item.is-primary {
+  border-left: 3px solid #e8774f;
+}
+
+.bibi-roster-id { grid-area: id; font-size: 0.72rem; opacity: 0.6; }
+.bibi-roster-name { grid-area: name; font-weight: 600; font-size: 0.9rem; }
+.bibi-roster-role { grid-area: role; font-size: 0.75rem; opacity: 0.7; }
+.bibi-roster-item .bibi-badge { grid-area: badge; justify-self: start; }
+
+/* ------------------------------------------------------------------ badges */
+
+.bibi-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  background: rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+}
+
+.bibi-badge-live { background: rgba(134, 173, 105, 0.24); }
+.bibi-badge-queued { background: rgba(226, 166, 63, 0.24); }
+.bibi-badge-blocked { background: rgba(227, 104, 92, 0.24); }
+
+.bibi-connector-online { background: rgba(134, 173, 105, 0.24); }
+.bibi-connector-stale { background: rgba(226, 166, 63, 0.24); }
+.bibi-connector-offline,
+.bibi-connector-unknown { background: rgba(227, 104, 92, 0.24); }
+
+.bibi-status-succeeded { background: rgba(134, 173, 105, 0.24); }
+.bibi-status-failed { background: rgba(227, 104, 92, 0.24); }
+.bibi-status-running,
+.bibi-status-leased { background: rgba(97, 151, 207, 0.24); }
+.bibi-status-blocked { background: rgba(226, 166, 63, 0.24); }
+.bibi-status-cancelled { opacity: 0.6; }
+
+/* -------------------------------------------------------------------- chat */
+
+.bibi-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  padding: 14px;
+  min-height: 60vh;
+}
+
+.bibi-chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.bibi-chat-header h2 { margin: 0; font-size: 1.05rem; }
+.bibi-chat-header p { margin: 2px 0 0; font-size: 0.82rem; opacity: 0.7; }
+
+.bibi-chat-notice {
+  margin: 0;
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(226, 166, 63, 0.16);
+}
+
+.bibi-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bibi-message p { margin: 2px 0 0; white-space: pre-wrap; }
+.bibi-message-role { font-size: 0.72rem; opacity: 0.6; }
+.bibi-message.is-user { align-self: flex-end; text-align: right; max-width: 78%; }
+.bibi-message.is-assistant { align-self: flex-start; max-width: 78%; }
+
+.bibi-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.bibi-composer textarea {
+  flex: 1;
+  resize: vertical;
+  font: inherit;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+/* ------------------------------------------------------------------- work */
+
+.bibi-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bibi-intake,
+.bibi-board,
+.bibi-setup {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.bibi-intake {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bibi-intake h2,
+.bibi-board h2 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.bibi-intake label {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.bibi-intake input,
+.bibi-intake textarea,
+.bibi-intake select {
+  font: inherit;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.bibi-intake-notice {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(226, 166, 63, 0.16);
+}
+
+.bibi-board ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bibi-work-head {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bibi-work-title { font-weight: 600; font-size: 0.88rem; }
+.bibi-work-profile { font-size: 0.74rem; opacity: 0.65; }
+
+.bibi-work-detail {
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bibi-work-detail h3 {
+  margin: 0 0 4px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
+.bibi-work-evidence ul,
+.bibi-work-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bibi-work-evidence pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.05);
+  overflow-x: auto;
+  max-height: 180px;
+  font-size: 0.74rem;
+}
+
+.bibi-evidence-kind {
+  margin-left: 6px;
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
+.bibi-work-events li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.bibi-error { color: #b8452f; font-size: 0.82rem; margin: 4px 0 0; }
+.bibi-blocked { color: #9a6b17; font-size: 0.82rem; margin: 4px 0 0; }
+.bibi-empty { opacity: 0.6; font-size: 0.85rem; margin: 0; }
+
+.bibi-setup ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 1080px) {
+  .bibi-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bibi-roster ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: none;
+  }
+
+  .bibi-roster-item {
+    width: auto;
+    min-width: 150px;
+  }
+}
+
+.bibi-chat-identity {
+  margin: 4px 0 0;
+  font-size: 0.74rem;
+  opacity: 0.6;
+}
+
+.bibi-chat-identity code {
+  font-size: 0.74rem;
+}
+
+/* ---------------------------------------------------------------- sign-in */
+
+.bibi-signin {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: min(340px, 100%);
+  min-width: 0;
+  margin-top: 12px;
+}
+
+.bibi-signin label {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.bibi-signin input {
+  font: inherit;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.bibi-signin input[aria-invalid="true"] {
+  border-color: #c2563c;
+}
+
+.bibi-signin button {
+  margin-top: 8px;
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+}
+
+.bibi-signin button[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bibi-field-problem {
+  font-size: 0.76rem;
+  color: #b8452f;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Signed out, the surface holds a single card; it is centred at a reading width
+   so a 1440px content column does not strand a 340px form against the left
+   edge. Only this branch carries `is-auth` — the signed-in three-column
+   workspace keeps the whole content width. */
+.bibi-workspace.is-auth {
+  align-items: center;
+}
+
+.bibi-auth {
+  width: 100%;
+  max-width: 460px;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.bibi-setup h2,
+.bibi-setup p,
+.bibi-setup li {
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.bibi-signin-note {
+  margin: 12px 0 0;
+  max-width: 100%;
+  font-size: 0.78rem;
+  opacity: 0.65;
+  /* Korean prose breaks between words where it can, and mid-token only when a
+     single run is wider than the card. Neither may spill out of the card. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.bibi-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bibi-identity {
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.bibi-signout {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  background: transparent;
+  cursor: pointer;
+}
+
+.bibi-chat-pending {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------------ mobile */
+
+/* At 390px the content column is the whole viewport, so the surface trims its
+   own padding to the safe area instead of relying on the page to absorb it.
+   Nothing inside may exceed the column: the card, the form and the helper text
+   all resolve against it. */
+@media (max-width: 640px) {
+  .bibi-workspace {
+    gap: 12px;
+    padding: 14px max(12px, env(safe-area-inset-right)) 18px max(12px, env(safe-area-inset-left));
+  }
+
+  .bibi-auth {
+    max-width: 100%;
+  }
+
+  .bibi-setup,
+  .bibi-intake,
+  .bibi-board,
+  .bibi-chat,
+  .bibi-roster {
+    padding: 12px;
+  }
+
+  .bibi-signin,
+  .bibi-signin input,
+  .bibi-signin button,
+  .bibi-signin-note {
+    max-width: 100%;
+  }
+}
