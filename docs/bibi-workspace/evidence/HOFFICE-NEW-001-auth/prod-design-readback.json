@@ -1,0 +1,155 @@
+{
+  "site": "https://bibi-workspace-18.vercel.app",
+  "viewports": [
+    360,
+    390,
+    1440
+  ],
+  "all_found": true,
+  "console_errors_total": 3,
+  "findings": [
+    {
+      "id": "P1",
+      "finding": "signed-out shell is locked on Production",
+      "pass": true
+    },
+    {
+      "id": "P2",
+      "finding": "error state carries a non-colour cue on Production",
+      "pass": true
+    },
+    {
+      "id": "P3",
+      "finding": "no layout shift when the real server rejects a sign-in",
+      "pass": true
+    },
+    {
+      "id": "P4",
+      "finding": "no account-existence disclosure and no sign-up control",
+      "pass": true
+    },
+    {
+      "id": "P5",
+      "finding": "no horizontal overflow at 360/390/1440",
+      "pass": true
+    }
+  ],
+  "verdict": "PASS",
+  "failed": [],
+  "results": [
+    {
+      "viewport": "360",
+      "width": 360,
+      "found": true,
+      "measurements": {
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "statusText": "로그인 필요",
+        "errorSlotHeightPx": 38,
+        "signUpControlPresent": false,
+        "horizontalOverflow": false,
+        "documentWidth": 360,
+        "viewportWidth": 360
+      },
+      "screenshot": "prod-locked-shell-360.png",
+      "layoutShift": {
+        "submitTopBeforePx": 404,
+        "submitTopAfterPx": 404,
+        "shiftPx": 0
+      },
+      "errorStyle": {
+        "borderTopWidthPx": 1,
+        "borderLeftWidthPx": 3,
+        "backgroundIsTransparent": false,
+        "markerContent": "\"!\"",
+        "discloses": false,
+        "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+      },
+      "errorScreenshot": "prod-error-state-360.png",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 ()"
+      ]
+    },
+    {
+      "viewport": "390",
+      "width": 390,
+      "found": true,
+      "measurements": {
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "statusText": "로그인 필요",
+        "errorSlotHeightPx": 38,
+        "signUpControlPresent": false,
+        "horizontalOverflow": false,
+        "documentWidth": 390,
+        "viewportWidth": 390
+      },
+      "screenshot": "prod-locked-shell-390.png",
+      "layoutShift": {
+        "submitTopBeforePx": 429,
+        "submitTopAfterPx": 429,
+        "shiftPx": 0
+      },
+      "errorStyle": {
+        "borderTopWidthPx": 1,
+        "borderLeftWidthPx": 3,
+        "backgroundIsTransparent": false,
+        "markerContent": "\"!\"",
+        "discloses": false,
+        "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+      },
+      "errorScreenshot": "prod-error-state-390.png",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 ()"
+      ]
+    },
+    {
+      "viewport": "1440",
+      "width": 1440,
+      "found": true,
+      "measurements": {
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "statusText": "로그인 필요",
+        "errorSlotHeightPx": 38,
+        "signUpControlPresent": false,
+        "horizontalOverflow": false,
+        "documentWidth": 1440,
+        "viewportWidth": 1440
+      },
+      "screenshot": "prod-locked-shell-1440.png",
+      "layoutShift": {
+        "submitTopBeforePx": 457,
+        "submitTopAfterPx": 457,
+        "shiftPx": 0
+      },
+      "errorStyle": {
+        "borderTopWidthPx": 1,
+        "borderLeftWidthPx": 3,
+        "backgroundIsTransparent": false,
+        "markerContent": "\"!\"",
+        "discloses": false,
+        "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+      },
+      "errorScreenshot": "prod-error-state-1440.png",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 ()"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "site": "https://bibi-workspace-18.vercel.app",
+  "results": [
+    {
+      "scene": "prod-signin",
+      "viewport": "360",
+      "width": 360,
+      "found": true,
+      "urlAfterLoad": "https://bibi-workspace-18.vercel.app/",
+      "authParamsRemaining": false,
+      "overflow": {
+        "documentWidth": 360,
+        "viewportWidth": 360,
+        "horizontalOverflow": false
+      },
+      "hasSignUpControl": false,
+      "screenshot": "prod-signin-360.png",
+      "consoleErrors": []
+    },
+    {
+      "scene": "prod-invite-expired",
+      "viewport": "360",
+      "width": 360,
+      "found": true,
+      "urlAfterLoad": "https://bibi-workspace-18.vercel.app/",
+      "authParamsRemaining": false,
+      "overflow": {
+        "documentWidth": 360,
+        "viewportWidth": 360,
+        "horizontalOverflow": false
+      },
+      "noticeText": "초대 링크가 만료되었거나 이미 사용되었습니다. 소유자에게 새 초대를 요청하세요.",
+      "hasSignUpControl": false,
+      "screenshot": "prod-invite-expired-360.png",
+      "consoleErrors": []
+    },
+    {
+      "scene": "prod-signin",
+      "viewport": "390",
+      "width": 390,
+      "found": true,
+      "urlAfterLoad": "https://bibi-workspace-18.vercel.app/",
+      "authParamsRemaining": false,
+      "overflow": {
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false
+      },
+      "hasSignUpControl": false,
+      "screenshot": "prod-signin-390.png",
+      "consoleErrors": []
+    },
+    {
+      "scene": "prod-invite-expired",
+      "viewport": "390",
+      "width": 390,
+      "found": true,
+      "urlAfterLoad": "https://bibi-workspace-18.vercel.app/",
+      "authParamsRemaining": false,
+      "overflow": {
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false
+      },
+      "noticeText": "초대 링크가 만료되었거나 이미 사용되었습니다. 소유자에게 새 초대를 요청하세요.",
+      "hasSignUpControl": false,
+      "screenshot": "prod-invite-expired-390.png",
+      "consoleErrors": []
+    },
+    {
+      "scene": "prod-signin",
+      "viewport": "desktop",
+      "width": 1440,
+      "found": true,
+      "urlAfterLoad": "https://bibi-workspace-18.vercel.app/",
+      "authParamsRemaining": false,
+      "overflow": {
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false
+      },
+      "hasSignUpControl": false,
+      "screenshot": "prod-signin-desktop.png",
+      "consoleErrors": []
+    },
+    {
+      "scene": "prod-invite-expired",
+      "viewport": "desktop",
+      "width": 1440,
+      "found": true,
+      "urlAfterLoad": "https://bibi-workspace-18.vercel.app/",
+      "authParamsRemaining": false,
+      "overflow": {
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false
+      },
+      "noticeText": "초대 링크가 만료되었거나 이미 사용되었습니다. 소유자에게 새 초대를 요청하세요.",
+      "hasSignUpControl": false,
+      "screenshot": "prod-invite-expired-desktop.png",
+      "consoleErrors": []
+    },
+    {
+      "scene": "prod-signin-rejected",
+      "viewport": "390",
+      "width": 390,
+      "found": true,
+      "errorText": "이메일 또는 비밀번호가 올바르지 않습니다.",
+      "disclosesAccountExistence": false,
+      "screenshot": "prod-signin-rejected-390.png"
+    }
+  ]
+}

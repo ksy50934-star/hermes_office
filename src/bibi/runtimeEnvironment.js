@@ -151,6 +151,56 @@ export function describeRuntimeMismatch(environment) {
   };
 }
 
+/**
+ * The findings that describe the *connector's* environment rather than the
+ * browser's. The browser cannot read any of them: it has no view of the Mac's
+ * process environment, only of the `connector_nodes` row the connector chose to
+ * write. Until the connector has actually checked in there is no row to read
+ * these from, and an unread value is not a misconfigured one.
+ */
+export const CONNECTOR_DERIVED_CODES = Object.freeze([
+  RUNTIME_CODES.CONNECTOR_MODE_UNSET,
+  RUNTIME_CODES.UNSUPPORTED_CONNECTOR_MODE,
+  RUNTIME_CODES.REMOTE_HERMES_TARGET,
+  RUNTIME_CODES.INBOUND_PORT_CONFIGURED,
+  RUNTIME_CODES.LOCAL_STATE_UPLOAD,
+]);
+
+/**
+ * What the browser is entitled to say about the runtime.
+ *
+ * `describeRuntimeMismatch` is written for a process that can read the whole
+ * environment, and against an empty value it correctly concludes "unset". In a
+ * browser that conclusion is wrong in a specific and damaging way: a clean
+ * production sign-in, before any connector has ever run, showed a red
+ * `BIBI_CONNECTOR_MODE 미설정` card next to a full list of unreported profiles.
+ * Nothing was misconfigured. The connector simply had not reported yet, which
+ * the surface already says, neutrally, as UNKNOWN.
+ *
+ * So a heartbeat is the precondition for judging the connector at all. Before
+ * one arrives, connector-derived findings are withheld — not softened, and not
+ * restated as a warning, because there is no evidence either way. Findings
+ * about the browser's own configuration are untouched: those it can see.
+ *
+ * @param {object} environment
+ * @param {boolean} [options.connectorReported] true only once a connector has a
+ *   real heartbeat timestamp. Defaults to false, so a caller that forgets to
+ *   pass it withholds rather than accuses.
+ */
+export function describeBrowserRuntimeMismatch(environment, { connectorReported = false } = {}) {
+  const report = describeRuntimeMismatch(environment);
+  if (connectorReported) return { ...report, connectorReported: true };
+
+  const withheld = new Set(CONNECTOR_DERIVED_CODES);
+  const warnings = report.warnings.filter((item) => !withheld.has(item.code));
+  return {
+    ok: warnings.length === 0,
+    blocking: warnings.some((item) => item.severity === SEVERITY.BLOCKING),
+    warnings,
+    connectorReported: false,
+  };
+}
+
 export function runtimeSummaryText(report) {
   if (!report || report.ok) return "";
   const codes = new Set(report.warnings.map((item) => item.code));

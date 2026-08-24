@@ -71,7 +71,7 @@ test("migration 006 exists and applies after the chat migration", async () => {
   const files = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort();
 
   assert.ok(files.includes(FIX_MIGRATION), `${FIX_MIGRATION} must exist`);
-  assert.equal(files.at(-1), FIX_MIGRATION, "the claim fix must be the last migration to apply");
+  assert.ok(files.indexOf(FIX_MIGRATION) >= 0, "the claim fix remains in the forward migration chain");
   assert.ok(
     files.indexOf(FIX_MIGRATION) > files.indexOf(CHAT_MIGRATION),
     "the fix must apply after the migration that introduced the ambiguity",

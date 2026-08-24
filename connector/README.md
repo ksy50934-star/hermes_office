@@ -30,9 +30,8 @@ owner afterwards.
 value to take until a permanent connector is registered. That registration waits
 on the owner's permanent account, not on anything in this repository.
 
-Registering one means inserting a `connector_nodes` row and a
-`connector_credentials` row holding the **SHA-256 hash** of a freshly generated
-token; the plaintext is shown once and never stored. See the status block in
+`connector/ops.js provision` is that registration. See
+[Provisioning](#provisioning) below and the status block in
 `../docs/bibi-workspace/00-OVERVIEW.md`.
 
 ## Running it
@@ -52,7 +51,7 @@ To let it actually run work:
 
 ```sh
 BIBI_CONNECTOR_ALLOW_LOCAL_EXECUTION=true \
-BIBI_HERMES_BIN=/usr/local/bin/hermes \
+BIBI_HERMES_BIN="$HOME/.local/bin/hermes" \
 BIBI_HERMES_DEFAULT_HOME="$HOME/.hermes" \
 BIBI_HERMES_PROFILES_ROOT="$HOME/.hermes/profiles" \
 ... node connector/index.js
@@ -61,6 +60,144 @@ BIBI_HERMES_PROFILES_ROOT="$HOME/.hermes/profiles" \
 All three Hermes settings are required once local execution is enabled; the
 connector refuses to start without them rather than failing at the first
 command. See `.env.cloud.example` for the complete contract.
+
+## Provisioning
+
+One command creates the owner's Auth user, the `connector_nodes` row, the
+`connector_credentials` row and both Keychain items — or refuses and changes
+nothing.
+
+```sh
+SUPABASE_URL=https://<ref>.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<service role key> \
+  node connector/ops.js provision \
+    --owner-email owner@example.com \
+    --node-label local-mac < /path/to/password-file
+```
+
+### Where each input comes from, and why
+
+| Input | Source | Why not elsewhere |
+|---|---|---|
+| owner email | `--owner-email` | Not a secret. Being explicit is what stops the connector binding to the wrong account. |
+| node label | `--node-label` | Not a secret. It is the Keychain account name, so it is stable and documented. |
+| owner password | stdin, or `--password-fd <n>` | A `--password` flag would put it in the shell history and in `ps`. Passing it is refused outright. |
+| Supabase service key | `SUPABASE_SERVICE_ROLE_KEY` | Same reason. `--service-role-key` is refused too. |
+| connector token | generated here | It is never an input. It is created, hashed, stored and forgotten in one call. |
+
+### What ends up where
+
+| Artifact | Location | Contents |
+|---|---|---|
+| Auth user | Supabase | email + password hash |
+| `connector_nodes` row | Supabase | label, platform, mode |
+| `connector_credentials` row | Supabase | **SHA-256 hash** and a 4-character prefix. Never the token. |
+| connector token | macOS Keychain | service `com.bibi.workspace.connector-token`, account `<node label>` |
+| login password | macOS Keychain | service `com.bibi.workspace.owner-login`, account `<owner email>` |
+
+Those two service names are the stable contract. The rendered LaunchAgent
+wrapper reads the first one by name, so renaming either orphans an item rather
+than migrating it.
+
+### Idempotent, or refused
+
+| Found | Result | Exit |
+|---|---|---|
+| none of the five | provisions all five | 0 |
+| all five | reports and changes nothing | 0 |
+| anything in between | refuses, naming what exists and what does not | 3 |
+
+A half-provisioned account is not repaired by guessing: a node row without a
+credential and a Keychain item without a row look identical from here, and
+picking wrong either strands a credential the owner cannot revoke or overwrites
+one that is in use.
+
+The one legitimate partial state is an owner account created by hand in the
+Supabase dashboard with nothing else yet. `--allow-existing-owner` adopts it;
+without that flag it is a refusal like any other.
+
+If a step fails part-way, everything already created is removed in reverse
+order and the command exits 4. If a rollback step *also* fails it exits **5**
+and names the stranded artifact, because a silent partial cleanup is the one
+outcome that cannot be recovered from later.
+
+### Reading it back
+
+```sh
+SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… \
+  node connector/ops.js readback --owner-email owner@example.com --node-label local-mac --json
+```
+
+Identifiers, status, the token prefix and SHA-256 fingerprints. Never a token,
+never a password, never the stored hash — the hash is enough to check a guessed
+token against offline, so only a fingerprint of it leaves the process.
+
+## Running it under launchd
+
+The LaunchAgent keeps the connector running across logins and reboots. **No
+secret is written into the plist**: it carries the environment contract, and the
+wrapper it launches reads the token from the Keychain at start time.
+
+Render both files and read them before installing anything:
+
+```sh
+node connector/ops.js launchagent render \
+  --node-label local-mac \
+  --control-plane-url https://<your-vercel-domain> \
+  --allow-local-execution
+```
+
+Install, inspect, remove:
+
+```sh
+node connector/ops.js launchagent install --node-label local-mac --control-plane-url https://… [--force]
+node connector/ops.js launchagent inspect
+node connector/ops.js launchagent uninstall
+```
+
+| Path | What |
+|---|---|
+| `~/Library/LaunchAgents/com.bibi.workspace.connector.plist` | the job, mode 600 |
+| `~/Library/Application Support/BibiWorkspace/connector-run.sh` | the wrapper, mode 700 |
+| `~/Library/Logs/BibiWorkspace/connector.out.log` | stdout |
+| `~/Library/Logs/BibiWorkspace/connector.err.log` | stderr |
+
+`RunAtLoad` starts it; `KeepAlive` restarts it; `ThrottleInterval` (default 30s)
+is what stops a job that fails instantly from restarting as fast as the machine
+allows. `uninstall` boots the job out and removes those two files. It keeps the
+logs — they are the only record of why the connector stopped — and it never
+touches the Keychain, because removing a launcher is not revoking a credential.
+
+Defaults for the Hermes settings are the layout verified on this Mac,
+expressed relative to `$HOME`: `~/.local/bin/hermes`, `~/.hermes` and
+`~/.hermes/profiles`. `BIBI_HERMES_*` or the matching `--hermes-*` flags
+override them.
+
+## Dry run
+
+Every command takes `--dry-run`, which validates the inputs and renders the
+artifacts while touching **nothing**: no Keychain call, no Supabase client is
+even imported, no `launchctl`, no file under `~/Library`. It does not read the
+password either — a rehearsal should not consume the owner's secret just to
+print a plan.
+
+```sh
+node connector/ops.js provision --owner-email owner@example.com --node-label local-mac --dry-run --json
+node connector/ops.js launchagent install --node-label local-mac --control-plane-url https://… --dry-run
+```
+
+`--dry-run` is a rehearsal, not a bypass: a malformed email or a plain-HTTP
+control plane URL still fails.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | done, or already in the requested state |
+| 2 | usage or input validation |
+| 3 | refused: partial state, or a LaunchAgent already installed |
+| 4 | failed, and everything it had created was rolled back |
+| 5 | failed **and** the rollback could not finish. Needs a person. |
 
 ## How a profile is chosen
 
@@ -107,3 +244,7 @@ so nothing is lost and nothing is double-run.
 | Workspace shows a profile OFFLINE | Its home directory does not exist under the configured root |
 | Workspace shows CEO비비 OFFLINE | `BIBI_HERMES_DEFAULT_HOME` is wrong, or `~/.hermes` is missing |
 | `EXECUTION_TIMEOUT` | The run exceeded `BIBI_HERMES_TIMEOUT_MS`; the child was killed |
+| `provision` exits 3 | Some of the five artifacts already exist; the report names which |
+| `provision` exits 5 | A rollback could not finish. Do not re-run; check the named artifact first |
+| Wrapper exits 78 | The Keychain item is missing or access was denied; run `provision` first |
+| LaunchAgent restarting in a loop | Check `~/Library/Logs/BibiWorkspace/connector.err.log`; restarts are throttled to 30s |

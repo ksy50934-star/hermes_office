@@ -10,6 +10,43 @@
 
 export const BIBI_VIEW_ID = "ceo";
 
+/**
+ * Every view that displays organisation, conversations, work or artifacts uses
+ * the authenticated cloud contract. Legacy Hermes Office remains available only
+ * for low-level system/plugin/terminal tooling; it never supplies Bibi data.
+ */
+export const BIBI_SURFACE_IDS = Object.freeze(new Set([
+  "ceo", "office", "chat", "meeting", "kanban", "command", "data", "sessions", "team",
+]));
+
 export function isBibiSurface(view) {
-  return view === BIBI_VIEW_ID;
+  return BIBI_SURFACE_IDS.has(view);
+}
+
+/**
+ * Whether the Bibi surface is showing an authentication gate or the workspace.
+ *
+ * The shell owns the navigation but not the session, and the workspace owns the
+ * session but not the navigation, so one of them has to tell the other. This is
+ * the vocabulary they share. It lives here, next to `isBibiSurface`, because
+ * this module is already the seam between the legacy chrome and the Bibi
+ * surface, and because a bare boolean crossing that seam would not say which
+ * way round it ran.
+ */
+export const AUTH_GATE = Object.freeze({
+  /** A gate is on screen: sign in, redeem an invite, or set a password. */
+  LOCKED: "LOCKED",
+  /** The signed-in workspace is on screen. */
+  OPEN: "OPEN",
+});
+
+/**
+ * Default to locked.
+ *
+ * The shell renders before the workspace has reported anything, and for that
+ * first frame the honest answer is "not signed in yet". Defaulting to OPEN
+ * would flash a full navigation bar at someone who has not authenticated.
+ */
+export function isAuthLocked(view, gate) {
+  return isBibiSurface(view) && gate !== AUTH_GATE.OPEN;
 }

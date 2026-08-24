@@ -148,7 +148,7 @@ test("a non-Bibi surface still mints its ticket and opens the gateway", async (t
   let reconnects = 0;
   const failures = [];
   const stop = startLegacyRealtime({
-    enabled: !isBibiSurface("chat"),
+    enabled: !isBibiSurface("terminal"),
     gateway,
     onConnectFailure: (error) => failures.push(error),
     reconnect: () => { reconnects += 1; },
@@ -191,12 +191,10 @@ test("the gate is wired from the active view down to the chat runtime", async ()
   );
 });
 
-test("the chat runtime is the only gateway consumer mounted behind the Bibi view", async () => {
+test("legacy gateway consumers are not mounted behind any Bibi owner-data view", async () => {
   const app = await read("src/App.jsx");
 
-  // ProfileChat is deliberately always mounted; the other two gateway owners
-  // are not, so gating ProfileChat is enough to keep ws-ticket off the surface.
-  assert.match(app, /\{view === "meeting" && activeMeetings\.length > 0 && \(/);
+  assert.match(app, /\{!bibiSurface && view === "meeting" && activeMeetings\.length > 0 && \(/);
   assert.match(app, /\{view === "terminal" && \(/);
-  assert.match(app, /persistent-chat-runtime/);
+  assert.match(app, /\{!bibiSurface && \(\s*<section[\s\S]*?persistent-chat-runtime/);
 });

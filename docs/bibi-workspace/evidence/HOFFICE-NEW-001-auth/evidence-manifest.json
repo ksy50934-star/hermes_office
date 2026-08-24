@@ -1,0 +1,295 @@
+{
+  "document": "evidence-manifest",
+  "task_id": "HOFFICE-NEW-001-AUTH",
+  "generation": "G5-design-response",
+  "writer_session_id": "a656c64e-2d11-4a17-9133-f8d8f5bdace5",
+  "purpose": "Pins every artifact of this evidence generation by content hash, so a reviewer can state exactly which bytes they read. Earlier generations were rewritten in place without a manifest, which is how the receipt hash drifted out from under bibi-06.",
+  "self_reference": {
+    "this_file": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/evidence-manifest.json",
+    "hashed_here": false,
+    "why": "A file cannot contain its own hash — writing the hash changes the bytes it describes. This manifest is therefore the one artifact it does not list, and it is written last so every hash below is final.",
+    "receipt_self_hash": "implementation-receipt.json likewise does not carry its own sha256; it is listed below instead."
+  },
+  "supersedes": {
+    "receipt_sha256_observed_by_bibi_06": "e656e692d06f585d658080f5eef4488ec2c4fc79c9dd1a8ec9f0ab75a06b48cf",
+    "receipt_sha256_immediately_prior": "c4790dc58644b2339b2910bf905434fb5033a849d43c8b5bc7f344b794217428"
+  },
+  "verification_command": "shasum -a 256 <path>",
+  "counts": {
+    "receipts": 2,
+    "readbacks": 5,
+    "tools": 5,
+    "screenshots": 31,
+    "documents": 1,
+    "total": 44
+  },
+  "receipts": [
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/implementation-receipt.json",
+      "bytes": 55400,
+      "sha256": "d982ae1fb6c1e265cd5c5491eb836696024268ec2f7a51d338ef55fe1976b61f"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/design-response-receipt.json",
+      "bytes": 15975,
+      "sha256": "4288d3e8583a3ef096e89702167be23321f20bd5e609abab630103a79ba9d406"
+    }
+  ],
+  "readbacks": [
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/design-response-capture.json",
+      "bytes": 14615,
+      "sha256": "06b0fc0d08847c05f04d694d641de6a52c179adc5c0496e6a0a60b38c071cca4"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/prod-design-readback.json",
+      "bytes": 4370,
+      "sha256": "2944712f035e733f249bf2ed664c4711f908e415be533a009db06dce9994e2a9"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/rls-readback.json",
+      "bytes": 7859,
+      "sha256": "453683004a95fd793180f762eb29825dfb2b8f5dd7861fd03926acd1af6e8a51"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/prod-browser-readback.json",
+      "bytes": 3452,
+      "sha256": "70014c660be5a8845eb51c73d94a4fd91a8d349729eeca073c7e9cd0e203a27b"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/responsive-capture.json",
+      "bytes": 4763,
+      "sha256": "188cf113825d7596ebb02a82b85ef5593a0389a69388f3f9a4fa477bcd8dfdbd"
+    }
+  ],
+  "tools": [
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/tools/capture-responsive.mjs",
+      "bytes": 8078,
+      "sha256": "66c86e8ce829ff10e8ab4d5b35126125874a464600fdc094cd56579591a456fe"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/tools/design-response-capture.mjs",
+      "bytes": 15429,
+      "sha256": "e9dc60bd57ccd582e9d2f697de2d3a6c1741edc50c61e33a337cf52581b7d613"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/tools/prod-design-readback.mjs",
+      "bytes": 7051,
+      "sha256": "d34af028789b88bd51f9ab5a0ff11d97f35bbd265acba5b7daef9b21f56e601c"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/tools/prod-readback.mjs",
+      "bytes": 4964,
+      "sha256": "f5e7973688fee17a29f619ac5cd53d962e0a0a90888f483cd16a36deb3da994a"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/tools/rls-readback.mjs",
+      "bytes": 11700,
+      "sha256": "fd275caa19e1e16daafd10f1e057735d8a7a0b7b26ba847d733647e32a4bba94"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/error-state-1440.png",
+      "bytes": 285168,
+      "sha256": "468dbb13982fa1e2917338a37dfd16bde87c732e8c767e298f657ea9672d5c5c"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/error-state-360.png",
+      "bytes": 108684,
+      "sha256": "f0703f714bcd86887475daa5a32f8d0f191796778b157e64ca145d58c4752ba3"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/error-state-390.png",
+      "bytes": 117806,
+      "sha256": "686d3603ab17511ef7985a2faf2d7cdb8b2a41cc53baedc2b3e2f6a4deb8e05c"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/invite-expired-360.png",
+      "bytes": 110570,
+      "sha256": "549767ba81175980eb9bf5fb97bc8c07d7646096d945d56128ddb56dc87a6fa7"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/invite-expired-390.png",
+      "bytes": 119724,
+      "sha256": "72de6114b4eca5377976b6d732613e47a063c5073f30d1a890f057726d241cd0"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/invite-expired-desktop.png",
+      "bytes": 261799,
+      "sha256": "092b31c5ff1c5df8ae1401b013b2308ccc2b1cec94af543a29bf1137c442d774"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/invite-password-setup-360.png",
+      "bytes": 131539,
+      "sha256": "6a039e6e5f082c3a7db72e22e49d3e1624958863f755aa42ebfefb8bcd7d3f88"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/invite-password-setup-390.png",
+      "bytes": 140794,
+      "sha256": "e1f69cabeb189ce5b12cc0636ef2d1525a8185c6580e87737ba2c228aea620b7"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/invite-password-setup-desktop.png",
+      "bytes": 285123,
+      "sha256": "de0e58b0a4461b1201555b2026f74d320f6dff2c2605cb2889a12acf3db9ef02"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/password-setup-1440.png",
+      "bytes": 308972,
+      "sha256": "8e2cf237e3c249aa1ae7d564e0a7169ff58a76754cc77b5a29a1cdab28600c6f"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/password-setup-360.png",
+      "bytes": 130622,
+      "sha256": "f4e6647fa4b68d37deaf220e8788bb1a1d643dcbcb92ed5738c6abc6ef10e0ab"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/password-setup-390.png",
+      "bytes": 139413,
+      "sha256": "cee1cb758544a6f27a3d265eeda8d68d364b3733f05eacce8a13749fb0a3bbd0"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-error-state-1440.png",
+      "bytes": 288398,
+      "sha256": "dc55120cea08a7e501dff52c66695cdcd66e2f8b07794fe459e9e9fb39f8de21"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-error-state-360.png",
+      "bytes": 111089,
+      "sha256": "c6889f70af6d7cd5c54a2ef2fc8e35f9d8f88d68af1bc7662952b1080e9cab8a"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-error-state-390.png",
+      "bytes": 120714,
+      "sha256": "8771b83594002a1d4a77a8a45f4f29749d51785f29faf60449edac0983a89c3a"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-invite-expired-360.png",
+      "bytes": 109413,
+      "sha256": "13d2f4b32c2d82cbd3c1e2a15b7f552e7b7b017aff3ab9b4e555255e71524c4d"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-invite-expired-390.png",
+      "bytes": 117218,
+      "sha256": "2c916c0c18b7eb75bd60f74b644900a238f0f3395b6935779804455409d0f9e7"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-invite-expired-desktop.png",
+      "bytes": 249761,
+      "sha256": "b7ace5bcf7465dcd87cba9cef6a594cfc142ccc0063cd64d884abfe56b59b76e"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-locked-shell-1440.png",
+      "bytes": 268498,
+      "sha256": "db63aea6c6bace4a56ae5361577c6d9e74cc5432e6d9081c63cd0d7160198024"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-locked-shell-360.png",
+      "bytes": 94785,
+      "sha256": "64f64adc0c82abca39ca8486faa065b35d6340092520ba54ad4719ac291901b9"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-locked-shell-390.png",
+      "bytes": 103245,
+      "sha256": "ac801b59505d6b5567f1b473db336b5c06b784909f7962baf5c311fad041a125"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-signin-360.png",
+      "bytes": 95360,
+      "sha256": "35963d26b266e5470f4f91e7729acb617f015d29b9cdb6f7ffe8d168e419d7f7"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-signin-390.png",
+      "bytes": 103444,
+      "sha256": "123e7ec8ce56451ce959ab5989a9784446ea881ee8dbb9a7bca1e4ea0837d26b"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-signin-desktop.png",
+      "bytes": 233944,
+      "sha256": "75225b845105cfda7f0603eea33ba821af1f3dbaecfd5cb3838ed15a54270293"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/prod-signin-rejected-390.png",
+      "bytes": 117918,
+      "sha256": "058062f46339242027789b4dd5386208d2370bb720d078736313f8c59364b658"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/signin-360.png",
+      "bytes": 96074,
+      "sha256": "83c62b62d58a0736b26b86dd65dc82c27277064598fa373e8eb727179cbf191b"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/signin-390.png",
+      "bytes": 104793,
+      "sha256": "14db8ecea884f2a3a8a164b3e86423b985275ef11bb96e0daeda2029ac628ebe"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/signin-desktop.png",
+      "bytes": 245834,
+      "sha256": "7c6275f469b3ff2b09b611466374d3d596448a6814814aff1db7894fb29f58ce"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/signin-locked-shell-1440.png",
+      "bytes": 285168,
+      "sha256": "468dbb13982fa1e2917338a37dfd16bde87c732e8c767e298f657ea9672d5c5c"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/signin-locked-shell-360.png",
+      "bytes": 108684,
+      "sha256": "f0703f714bcd86887475daa5a32f8d0f191796778b157e64ca145d58c4752ba3"
+    },
+    {
+      "path": "docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/screenshots/signin-locked-shell-390.png",
+      "bytes": 117806,
+      "sha256": "686d3603ab17511ef7985a2faf2d7cdb8b2a41cc53baedc2b3e2f6a4deb8e05c"
+    }
+  ],
+  "documents": [
+    {
+      "path": "docs/bibi-workspace/04-HOFFICE-NEW-001-AUTH-FINALIZATION.md",
+      "bytes": 24533,
+      "sha256": "74d082d649b8baafef4d0b4927f6f073f526edfa6a26079d8bf8e8aa033f3ea7"
+    }
+  ],
+  "sealed_state": {
+    "eslint_exit_code": 0,
+    "tests": {
+      "total": 603,
+      "pass": 603,
+      "fail": 0,
+      "skipped": 0,
+      "todo": 0,
+      "exit_code": 0
+    },
+    "build_exit_code": 0,
+    "package_files_scanned": 289,
+    "package_exit_code": 0,
+    "git_diff_check_exit_code": 0,
+    "production_deployment_id": "dpl_Fe9gbGtnUXNsAQPsNuyhUVn3g75s",
+    "production_alias": "https://bibi-workspace-18.vercel.app",
+    "production_still_live_at_seal_time": true,
+    "production_bundle": "/assets/index-BMZgfsNU-office-map-v2.js",
+    "production_stylesheet": "/assets/index-CEQp7c7O.css",
+    "local_pixel_findings": "5/5 PASS at 360/390/1440",
+    "production_pixel_findings": "5/5 PASS at 360/390/1440",
+    "rls_and_auth_expectations": "9/9 PASS",
+    "design_findings": "D1-D4 all PASS"
+  },
+  "blockers_at_seal_time": [
+    {
+      "id": "A22",
+      "status": "BLOCKED",
+      "reason": "owner must personally accept the invite and set a password"
+    },
+    {
+      "id": "A23",
+      "status": "BLOCKED",
+      "reason": "authenticated round trip and signed-in browser QA depend on A22"
+    }
+  ],
+  "completion_claimed": false,
+  "bibi_10_started": false,
+  "secret_values_present": false
+}

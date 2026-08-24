@@ -1,0 +1,165 @@
+{
+  "origin": "http://127.0.0.1:4599",
+  "dist": "/tmp/bibi-evidence-dist",
+  "results": [
+    {
+      "scene": "signin",
+      "viewport": "360",
+      "width": 360,
+      "selector": "#bibi-signin-email",
+      "found": true,
+      "overflow": {
+        "documentWidth": 360,
+        "viewportWidth": 360,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "signin-360.png",
+      "consoleErrors": [],
+      "error": null
+    },
+    {
+      "scene": "invite-password-setup",
+      "viewport": "360",
+      "width": 360,
+      "selector": "#bibi-new-password",
+      "found": true,
+      "overflow": {
+        "documentWidth": 360,
+        "viewportWidth": 360,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "invite-password-setup-360.png",
+      "consoleErrors": [
+        "WebSocket connection to 'ws://127.0.0.1:4599/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImJpYmktbG9jYWwtZXZpZGVuY2UiLCJleHAiOjE3ODc1MDg3MzN9.evidence"
+      ],
+      "error": null
+    },
+    {
+      "scene": "invite-expired",
+      "viewport": "360",
+      "width": 360,
+      "selector": ".bibi-notice",
+      "found": true,
+      "overflow": {
+        "documentWidth": 360,
+        "viewportWidth": 360,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "invite-expired-360.png",
+      "consoleErrors": [],
+      "error": null
+    },
+    {
+      "scene": "signin",
+      "viewport": "390",
+      "width": 390,
+      "selector": "#bibi-signin-email",
+      "found": true,
+      "overflow": {
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "signin-390.png",
+      "consoleErrors": [],
+      "error": null
+    },
+    {
+      "scene": "invite-password-setup",
+      "viewport": "390",
+      "width": 390,
+      "selector": "#bibi-new-password",
+      "found": true,
+      "overflow": {
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "invite-password-setup-390.png",
+      "consoleErrors": [
+        "WebSocket connection to 'ws://127.0.0.1:4599/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImJpYmktbG9jYWwtZXZpZGVuY2UiLCJleHAiOjE3ODc1MDg3MzN9.evidence"
+      ],
+      "error": null
+    },
+    {
+      "scene": "invite-expired",
+      "viewport": "390",
+      "width": 390,
+      "selector": ".bibi-notice",
+      "found": true,
+      "overflow": {
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "invite-expired-390.png",
+      "consoleErrors": [],
+      "error": null
+    },
+    {
+      "scene": "signin",
+      "viewport": "desktop",
+      "width": 1440,
+      "selector": "#bibi-signin-email",
+      "found": true,
+      "overflow": {
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "signin-desktop.png",
+      "consoleErrors": [],
+      "error": null
+    },
+    {
+      "scene": "invite-password-setup",
+      "viewport": "desktop",
+      "width": 1440,
+      "selector": "#bibi-new-password",
+      "found": true,
+      "overflow": {
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "invite-password-setup-desktop.png",
+      "consoleErrors": [
+        "WebSocket connection to 'ws://127.0.0.1:4599/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImJpYmktbG9jYWwtZXZpZGVuY2UiLCJleHAiOjE3ODc1MDg3MzN9.evidence"
+      ],
+      "error": null
+    },
+    {
+      "scene": "invite-expired",
+      "viewport": "desktop",
+      "width": 1440,
+      "selector": ".bibi-notice",
+      "found": true,
+      "overflow": {
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false
+      },
+      "urlAfterLoad": "http://127.0.0.1:4599/",
+      "tokenInUrl": false,
+      "screenshot": "invite-expired-desktop.png",
+      "consoleErrors": [],
+      "error": null
+    }
+  ]
+}

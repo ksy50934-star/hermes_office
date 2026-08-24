@@ -1,0 +1,252 @@
+{
+  "site": "https://bibi-workspace-18.vercel.app",
+  "bundle": "/assets/index-BMZgfsNU-office-map-v2.js",
+  "supabase_url": "https://morvnoyyncluohmwxmuh.supabase.co",
+  "key_kind": "publishable (public, ships in browser)",
+  "human_password_used": false,
+  "checks": {
+    "no_api_key": {
+      "label": "no apikey",
+      "path": "/rest/v1/bibi_profiles?select=id&limit=1",
+      "status": 401,
+      "rows": null,
+      "bodyExcerpt": "{\"message\":\"No API key found in request\",\"hint\":\"No `apikey` request header or url param was found.\"}"
+    },
+    "anonymous_select": [
+      {
+        "label": "bibi_profiles",
+        "path": "/rest/v1/bibi_profiles?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "connector_nodes",
+        "path": "/rest/v1/connector_nodes?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "connector_credentials",
+        "path": "/rest/v1/connector_credentials?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "conversations",
+        "path": "/rest/v1/conversations?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "messages",
+        "path": "/rest/v1/messages?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "work_items",
+        "path": "/rest/v1/work_items?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "work_events",
+        "path": "/rest/v1/work_events?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "work_results",
+        "path": "/rest/v1/work_results?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "work_evidence",
+        "path": "/rest/v1/work_evidence?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      },
+      {
+        "label": "command_leases",
+        "path": "/rest/v1/command_leases?select=*&limit=5",
+        "status": 200,
+        "rows": 0,
+        "bodyExcerpt": "[]"
+      }
+    ],
+    "anonymous_insert": {
+      "label": "insert work_items",
+      "path": "/rest/v1/work_items",
+      "status": 401,
+      "rows": null,
+      "bodyExcerpt": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"work_items\\\"\"}"
+    },
+    "anonymous_insert_conversations": {
+      "label": "insert conversations",
+      "path": "/rest/v1/conversations",
+      "status": 401,
+      "rows": null,
+      "bodyExcerpt": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"conversations\\\"\"}"
+    },
+    "table_existence": {
+      "note": "200 + 0 rows means the table exists and RLS filtered it; 404/PGRST205 would mean it is absent",
+      "control_missing_table": {
+        "label": "table_that_does_not_exist",
+        "path": "/rest/v1/table_that_does_not_exist?select=*&limit=1",
+        "status": 404,
+        "rows": null,
+        "bodyExcerpt": "{\"code\":\"PGRST205\",\"details\":null,\"hint\":null,\"message\":\"Could not find the table 'public.table_that_does_not_exist' in the schema cache\"}"
+      },
+      "present": [
+        "bibi_profiles",
+        "connector_nodes",
+        "connector_credentials",
+        "conversations",
+        "messages",
+        "work_items",
+        "work_events",
+        "work_results",
+        "work_evidence",
+        "command_leases"
+      ],
+      "absent": []
+    },
+    "auth_settings": {
+      "status": 200,
+      "disable_signup": true,
+      "external_email": true,
+      "external_anonymous_users": false,
+      "mailer_autoconfirm": false,
+      "oauth_providers_enabled": [],
+      "full": {
+        "external": {
+          "anonymous_users": false,
+          "apple": false,
+          "azure": false,
+          "bitbucket": false,
+          "discord": false,
+          "facebook": false,
+          "snapchat": false,
+          "figma": false,
+          "fly": false,
+          "github": false,
+          "gitlab": false,
+          "google": false,
+          "keycloak": false,
+          "kakao": false,
+          "linkedin": false,
+          "linkedin_oidc": false,
+          "notion": false,
+          "spotify": false,
+          "slack": false,
+          "slack_oidc": false,
+          "workos": false,
+          "twitch": false,
+          "twitter": false,
+          "email": true,
+          "phone": false,
+          "zoom": false
+        },
+        "disable_signup": true,
+        "mailer_autoconfirm": false,
+        "phone_autoconfirm": false,
+        "sms_provider": "twilio",
+        "saml_enabled": false,
+        "saml_private_key_next_configured": true,
+        "passkeys_enabled": false
+      }
+    },
+    "signup_attempt": {
+      "label": "signup",
+      "path": "/auth/v1/signup",
+      "status": 422,
+      "rows": null,
+      "bodyExcerpt": "{\"code\":422,\"error_code\":\"signup_disabled\",\"msg\":\"Signups not allowed for this instance\"}"
+    },
+    "redirect_configuration": {
+      "method": "unauthenticated /auth/v1/verify probes with a bogus token; nothing is consumed or created",
+      "allowed_target": {
+        "requested": "https://bibi-workspace-18.vercel.app",
+        "status": 303,
+        "redirectedTo": "https://bibi-workspace-18.vercel.app"
+      },
+      "foreign_target": {
+        "requested": "https://not-in-the-allowlist.example.com",
+        "status": 303,
+        "redirectedTo": "https://bibi-workspace-18.vercel.app"
+      },
+      "production_in_allowlist": true,
+      "site_url_observed": "https://bibi-workspace-18.vercel.app",
+      "site_url_is_production": true
+    }
+  },
+  "expectations": [
+    {
+      "id": "no_anonymous_read",
+      "expected": "every protected table returns zero rows to an anonymous caller",
+      "actual": "10/10 returned zero rows",
+      "pass": true
+    },
+    {
+      "id": "tables_exist",
+      "expected": "the zero rows above are RLS filtering, not a missing migration",
+      "actual": "10 present, control missing-table probe returned 404",
+      "pass": true
+    },
+    {
+      "id": "no_anonymous_write",
+      "expected": "anonymous inserts are refused by row level security",
+      "actual": "work_items 401, conversations 401",
+      "pass": true
+    },
+    {
+      "id": "api_key_required",
+      "expected": "a request with no api key is refused",
+      "actual": "401",
+      "pass": true
+    },
+    {
+      "id": "signup_disabled_in_config",
+      "expected": "disable_signup === true",
+      "actual": "true",
+      "pass": true
+    },
+    {
+      "id": "signup_refused_in_practice",
+      "expected": "POST /auth/v1/signup returns 422 signup_disabled and creates nothing",
+      "actual": "422 signup_disabled",
+      "pass": true
+    },
+    {
+      "id": "production_in_redirect_allowlist",
+      "expected": "an invite returning to https://bibi-workspace-18.vercel.app is allowed",
+      "actual": "https://bibi-workspace-18.vercel.app",
+      "pass": true
+    },
+    {
+      "id": "site_url_is_production",
+      "expected": "site_url is https://bibi-workspace-18.vercel.app, not localhost",
+      "actual": "https://bibi-workspace-18.vercel.app",
+      "pass": true
+    },
+    {
+      "id": "no_third_party_identity_providers",
+      "expected": "no OAuth provider and no anonymous users",
+      "actual": "oauth=[] anonymous_users=false",
+      "pass": true
+    }
+  ],
+  "account_created_by_probe": false,
+  "verdict": "PASS",
+  "failed_expectations": []
+}

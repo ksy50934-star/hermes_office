@@ -58,6 +58,75 @@
   align-items: start;
 }
 
+/* The LNB `01 CEO비비` destination is a viewport-owned application surface.
+   Its chrome and composer never scroll away; the message history owns the only
+   vertical scrollbar in the central chat panel. */
+.bibi-workspace.is-surface-ceo {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.bibi-workspace.is-surface-ceo > .bibi-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.bibi-workspace.is-surface-ceo .bibi-roster {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bibi-workspace.is-surface-ceo .bibi-roster ul {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.bibi-workspace.is-surface-ceo .bibi-chat {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.bibi-workspace.is-surface-ceo .bibi-messages {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.bibi-workspace.is-surface-ceo .bibi-composer {
+  flex: 0 0 auto;
+}
+
+.bibi-workspace.is-surface-ceo .bibi-side {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Office, meetings, data room and the remaining Bibi destinations are long
+   documents. The app shell itself is overflow-hidden, so these surfaces must
+   explicitly own scrolling or their real cloud content is unreachable. */
+.bibi-workspace:not(.is-surface-ceo) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.bibi-workspace > .bibi-warning {
+  flex: 0 0 auto;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
 /* ---------------------------------------------------------------- warnings */
 
 .bibi-warning {
@@ -383,8 +452,70 @@
   opacity: 0.75;
 }
 
-.bibi-error { color: #b8452f; font-size: 0.82rem; margin: 4px 0 0; }
-.bibi-blocked { color: #9a6b17; font-size: 0.82rem; margin: 4px 0 0; }
+/* A failure the user has to act on.
+ *
+ * Colour alone does not carry it: red-green colour blindness is common enough
+ * that "the text turned red" is not a signal, and on the translucent card a
+ * tinted sentence can read as ordinary prose. So the state is also carried by a
+ * shape — a tinted panel with a heavy leading rule — and by a `!` glyph that
+ * survives greyscale, high-contrast mode and a stylesheet that fails to load.
+ *
+ * The glyph is decorative in the accessibility sense: every consumer of this
+ * class already carries `role="alert"`, so a screen reader announces the
+ * sentence itself. `aria-hidden` keeps the marker from being read as "그리고
+ * 느낌표".
+ */
+.bibi-error {
+  position: relative;
+  color: #8f2f1c;
+  font-size: 0.82rem;
+  margin: 4px 0 0;
+  padding: 8px 10px 8px 30px;
+  border: 1px solid rgba(143, 47, 28, 0.32);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(184, 69, 47, 0.09);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.bibi-error::before {
+  content: "!";
+  position: absolute;
+  left: 9px;
+  top: 8px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+}
+
+/* Space held open for a failure that has not happened yet.
+ *
+ * Without this the first rejected sign-in pushes the submit button down by the
+ * height of the message, which lands under a cursor that was already moving
+ * toward it. One line's worth is reserved; a longer message still grows, but
+ * the common case no longer moves anything. */
+.bibi-error-slot {
+  min-height: 38px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.bibi-error-slot:empty {
+  min-height: 38px;
+}
+
+.bibi-error-slot .bibi-error {
+  margin: 0;
+  width: 100%;
+}
+
+.bibi-blocked { color: #7d5612; font-size: 0.82rem; margin: 4px 0 0; }
 .bibi-empty { opacity: 0.6; font-size: 0.85rem; margin: 0; }
 
 .bibi-setup ul {
@@ -411,6 +542,29 @@
 @media (max-width: 1080px) {
   .bibi-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* On a stacked layout the chat comes first and remains a bounded card. The
+     whole destination may scroll to the roster and work board, but long message
+     history still cannot push the composer out of its card. */
+  .bibi-workspace.is-surface-ceo {
+    height: auto;
+    overflow-y: auto;
+  }
+
+  .bibi-workspace.is-surface-ceo > .bibi-layout {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .bibi-workspace.is-surface-ceo .bibi-chat {
+    order: -1;
+    height: clamp(420px, 70dvh, 680px);
+  }
+
+  .bibi-workspace.is-surface-ceo .bibi-roster,
+  .bibi-workspace.is-surface-ceo .bibi-side {
+    overflow: visible;
   }
 
   .bibi-roster ul {
@@ -487,6 +641,77 @@
   overflow-wrap: anywhere;
 }
 
+/* The rule text under a password field. Same box as a field problem so the form
+   does not reflow when one replaces the other.
+
+   This text states the password rules, so it is not decoration — someone who
+   cannot read it cannot satisfy the field. It therefore carries a real colour
+   rather than a dimmed inherit: `opacity` multiplies against whatever the
+   surface behind it happens to be, which makes the final contrast unknowable
+   and, on the translucent card, measurably too low. An explicit ink value is
+   checkable. 0.8rem is the floor. */
+.bibi-field-hint {
+  font-size: 0.8rem;
+  color: #4a4f4c;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* A failed invite link, explained above the sign-in form. Advisory rather than
+   an error: the form below it still works. */
+.bibi-notice {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(154, 107, 23, 0.35);
+  background: rgba(154, 107, 23, 0.08);
+  color: #7a5411;
+  font-size: 0.8rem;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.bibi-identity-line {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  opacity: 0.7;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* The way out of a half-finished invite. Set apart from the submit button so
+   it cannot be hit by someone aiming for "save".
+
+   It stays visually secondary — transparent, pill-shaped, quieter than the
+   primary CTA above it — but secondary is a matter of emphasis, not of size.
+   A real finger needs a real target, so this meets the 44px minimum on its own
+   rather than relying on the line-height it happens to inherit. */
+/* Both classes in the selector on purpose. `.bibi-signout` is declared later in
+   this file and carries the same specificity, so a single-class rule here would
+   lose the padding to it on source order alone — which is exactly what a pixel
+   measurement caught: the declared 10px/18px resolved to 4px/10px in the
+   browser while the source still read correctly. */
+.bibi-signout.bibi-abandon {
+  align-self: flex-start;
+  margin-top: 14px;
+  min-height: 44px;
+  padding: 10px 18px;
+  font-size: 0.82rem;
+  color: #3f4a44;
+  border-color: rgba(0, 0, 0, 0.22);
+}
+
+/* Keyboard users get the same affordance as pointer users. `:focus-visible`
+   rather than `:focus` so a mouse click does not leave a ring behind. */
+.bibi-signout:focus-visible,
+.bibi-abandon:focus-visible {
+  outline: 2px solid #1f5f4a;
+  outline-offset: 2px;
+  border-color: #1f5f4a;
+}
+
 /* Signed out, the surface holds a single card; it is centred at a reading width
    so a 1440px content column does not strand a 340px form against the left
    edge. Only this branch carries `is-auth` — the signed-in three-column
@@ -550,6 +775,64 @@
   font-style: italic;
 }
 
+/* ------------------------------------------------- signed-out shell lock */
+
+/* Before anyone has signed in, the chrome around the auth card still describes
+   a whole application. These rules make the difference between "available" and
+   "not yet" impossible to miss, and they are paired with a real `disabled`
+   attribute in the markup — appearance alone would be a lie a mouse could
+   disprove.
+   The lock is stated three ways so no single channel has to carry it: reduced
+   emphasis, a not-allowed cursor, and the word 잠김. Colour is not one of the
+   three. */
+.app-shell.is-auth-locked .sidebar nav button.is-locked,
+.app-shell.is-auth-locked .mobile-dock button.is-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+/* A word rather than a padlock glyph: it survives a missing icon font, reads
+   correctly in a screen magnifier, and needs no legend. */
+.app-shell.is-auth-locked .sidebar nav button.is-locked .nav-lock {
+  margin-left: auto;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0.9;
+}
+
+/* The one destination that is available signed out is the one you are on, so
+   it keeps full emphasis and does not compete with the dimmed rest. */
+.app-shell.is-auth-locked .sidebar nav button:not(.is-locked),
+.app-shell.is-auth-locked .mobile-dock button:not(.is-locked) {
+  opacity: 1;
+}
+
+.app-shell.is-auth-locked .sidebar-status span.locked {
+  background: #9a6b17;
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------- cloud surfaces */
+.bibi-cloud-page { display:flex; flex-direction:column; gap:16px; min-width:0; }
+.bibi-cloud-intro { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:18px; border-radius:14px; background:rgba(255,255,255,.68); }
+.bibi-cloud-intro span,.bibi-cloud-intro small { font-size:.7rem; letter-spacing:.08em; opacity:.65; }
+.bibi-cloud-intro h2 { margin:4px 0; }
+.bibi-cloud-intro p { margin:0; opacity:.72; }
+.bibi-cloud-roster-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; }
+.bibi-cloud-profile { text-align:left; padding:14px; border:1px solid rgba(29,35,32,.12); border-radius:12px; background:rgba(255,255,255,.65); color:inherit; }
+.bibi-cloud-profile h3 { margin:5px 0; }.bibi-cloud-profile p { min-height:2.8em; margin:0 0 8px; opacity:.72; }.bibi-cloud-profile small,.bibi-cloud-profile b { display:block; margin-top:6px; }
+.bibi-layout-chat { grid-template-columns:minmax(210px,260px) minmax(0,1fr); }.bibi-layout-work { grid-template-columns:minmax(210px,260px) minmax(260px,360px) minmax(0,1fr); }
+.bibi-meeting-create,.bibi-meeting-record,.bibi-artifact-card,.bibi-archive-list>article { padding:16px; border:1px solid rgba(29,35,32,.12); border-radius:14px; background:rgba(255,255,255,.65); }
+.bibi-meeting-create { display:flex; flex-direction:column; gap:14px; }.bibi-meeting-create>label { display:grid; gap:6px; }.bibi-meeting-create input[type="text"],.bibi-meeting-create>label input { width:100%; padding:10px; }
+.bibi-participant-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:7px; }.bibi-participant-grid label { display:flex; gap:8px; align-items:flex-start; padding:8px; border-radius:9px; background:rgba(0,0,0,.03); }.bibi-participant-grid small { display:block; opacity:.65; }
+.bibi-meeting-list,.bibi-archive-list { display:flex; flex-direction:column; gap:12px; }.bibi-meeting-record>header,.bibi-artifact-card>header,.bibi-archive-list article>header { display:flex; justify-content:space-between; gap:12px; }.bibi-meeting-record h3,.bibi-artifact-card h3 { margin:4px 0; }
+.bibi-meeting-responses { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:8px; margin-top:12px; }.bibi-meeting-responses section { padding:11px; border-radius:10px; background:rgba(0,0,0,.035); }.bibi-meeting-responses h4 { margin:0 0 4px; }.bibi-meeting-responses p { white-space:pre-wrap; }
+.bibi-artifact-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }.bibi-artifact-card dl { display:flex; flex-wrap:wrap; gap:8px 16px; }.bibi-artifact-card dl div { min-width:0; }.bibi-artifact-card dt { font-size:.68rem; opacity:.6; }.bibi-artifact-card dd { margin:2px 0; overflow-wrap:anywhere; }.bibi-artifact-card pre,.bibi-artifact-evidence code { max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }.bibi-artifact-evidence { display:grid; gap:5px; padding:10px; margin-top:8px; background:rgba(0,0,0,.035); border-radius:9px; }.bibi-muted { opacity:.55; }
+
 /* ------------------------------------------------------------------ mobile */
 
 /* At 390px the content column is the whole viewport, so the surface trims its
@@ -560,6 +843,21 @@
   .bibi-workspace {
     gap: 12px;
     padding: 14px max(12px, env(safe-area-inset-right)) 18px max(12px, env(safe-area-inset-left));
+  }
+
+  /* Reserve the fixed mobile dock before sizing the CEO chat. A viewport-only
+     check is insufficient because the dock overlays the bottom 74px. */
+  .bibi-workspace.is-surface-ceo .bibi-header > div:first-child,
+  .bibi-workspace.is-surface-ceo .bibi-header-actions .bibi-identity {
+    display: none;
+  }
+
+  .bibi-workspace.is-surface-ceo .bibi-header {
+    justify-content: flex-end;
+  }
+
+  .bibi-workspace.is-surface-ceo .bibi-chat {
+    height: max(320px, calc(100dvh - var(--mobile-dock-height, 74px) - 270px));
   }
 
   .bibi-auth {
@@ -577,7 +875,42 @@
   .bibi-signin,
   .bibi-signin input,
   .bibi-signin button,
-  .bibi-signin-note {
+  .bibi-signin-note,
+  .bibi-notice,
+  .bibi-field-hint,
+  .bibi-identity-line {
     max-width: 100%;
+  }
+}
+
+/* At 360px — the narrowest phone still in real use — the auth card has roughly
+   330px of usable width. Nothing in it may assume more, so the password form
+   and its two long helper lines are pinned to the column rather than to a
+   comfortable reading measure. */
+@media (max-width: 380px) {
+  .bibi-workspace {
+    padding: 12px max(10px, env(safe-area-inset-right)) 16px max(10px, env(safe-area-inset-left));
+  }
+
+  .bibi-setup {
+    padding: 11px;
+  }
+
+  .bibi-setup h2 {
+    font-size: 1rem;
+  }
+
+  .bibi-signin {
+    max-width: 100%;
+    margin-top: 10px;
+  }
+
+  /* Both classes here too, for the same reason as the base rule: at equal
+     specificity the later `.bibi-signout` would win. The 44px floor is not
+     relaxed at the narrowest width — a small screen is where a small target
+     hurts most. */
+  .bibi-signout.bibi-abandon {
+    width: auto;
+    min-height: 44px;
   }
 }

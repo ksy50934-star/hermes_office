@@ -33,7 +33,16 @@ export function getSupabaseClient(env = browserEnv()) {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true,
+      // The invite callback is consumed explicitly, not swept up on client
+      // construction. Letting the library do it would establish the session and
+      // erase the fragment before anything could read `type=invite` from it,
+      // and that flag is the only thing distinguishing a user who still has to
+      // choose a password from one who already has. See `bibi/authCallback.js`.
+      detectSessionInUrl: false,
+      // Invite links are minted server-side, so there is no code verifier in
+      // this browser to pair with a PKCE code. Stated rather than inherited,
+      // because the default changing would quietly break every invite.
+      flowType: "implicit",
     },
     realtime: {
       // Enough to follow a busy work board without flooding a laptop tab.

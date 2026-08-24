@@ -177,6 +177,47 @@ export function describeProfileMismatch(observedPhysicalProfiles) {
   };
 }
 
+/**
+ * The report for a connector that has not reported.
+ *
+ * `describeProfileMismatch(null)` says ROSTER_UNAVAILABLE and blocks, and an
+ * empty array says all eighteen profiles are missing. Both are true statements
+ * about the data and both are the wrong thing to put on screen before any
+ * connector has ever checked in: the surface already reports that state, once,
+ * as UNKNOWN. Repeating it as a blocking card plus seventeen warnings reads as
+ * eighteen faults where there is one fact.
+ *
+ * `missing` still lists the full roster, because that is what has not been
+ * observed. `warnings` is empty and `reported` is false, so a caller can tell
+ * "nothing is wrong" apart from "nothing is known".
+ */
+export function pendingProfileMismatch() {
+  return {
+    ok: true,
+    blocking: false,
+    reported: false,
+    warnings: [],
+    resolved: [],
+    missing: [...BIBI_PROFILE_IDS],
+    unexpected: [],
+  };
+}
+
+/**
+ * The gate the workspace uses: judge the reported roster only once there is a
+ * heartbeat proving something reported it.
+ *
+ * @param {object} options
+ * @param {Array<string|object>} [options.reportedProfileIds]
+ * @param {boolean} [options.connectorReported] true only once a connector has a
+ *   real heartbeat timestamp. Defaults to false, so a caller that forgets to
+ *   pass it withholds rather than accuses.
+ */
+export function describeConnectorProfileMismatch({ reportedProfileIds, connectorReported = false } = {}) {
+  if (!connectorReported) return pendingProfileMismatch();
+  return { ...describeProfileMismatch(reportedProfileIds ?? []), reported: true };
+}
+
 export function mismatchSummaryText(report) {
   if (!report || report.ok) return "";
   const parts = [];

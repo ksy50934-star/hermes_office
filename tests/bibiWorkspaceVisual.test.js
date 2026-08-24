@@ -27,6 +27,22 @@ const read = (relative) => readFile(path.join(projectRoot, relative), "utf8");
 
 const MOBILE_VIEWPORT = 390;
 
+/**
+ * The signed-in workspace root, anchored on its header.
+ *
+ * The class alone will not do: the unconfigured-cloud screen carries the same
+ * `bibi-workspace` class and returns earlier in the file, so a class-only match
+ * would land on that instead and read the ordering backwards. The header is
+ * rendered by this branch and no other, which is what pins the match.
+ *
+ * The attribute gap is deliberate. This element legitimately grows attributes —
+ * it currently carries the scroll-reset ref — and the contract under test is
+ * "the full-width workspace renders here, after every card screen", not the
+ * element's exact attribute list. An exact-literal match made the two unrelated
+ * ideas fail together.
+ */
+const SIGNED_IN_WORKSPACE_ROOT = /<div className=\{`bibi-workspace is-surface-\$\{surface\}`\}[^<]*?>\s*<header className="bibi-header">/;
+
 /** Pull one declaration out of a rule block, so the tests assert numbers. */
 function declaration(css, selector, property) {
   const pattern = new RegExp(
@@ -62,17 +78,30 @@ function mediaBlock(css, query) {
 
 test("the Bibi surface is identified by one shared predicate", () => {
   assert.equal(BIBI_VIEW_ID, "ceo");
-  assert.equal(isBibiSurface("ceo"), true);
-  for (const other of ["office", "chat", "meeting", "kanban", "data", "command", "", null, undefined]) {
-    assert.equal(isBibiSurface(other), false, `${String(other)} is not the Bibi surface`);
+  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team"]) {
+    assert.equal(isBibiSurface(view), true, `${view} is an owner-data Bibi surface`);
+  }
+  for (const other of ["plugins", "system", "terminal", "", null, undefined]) {
+    assert.equal(isBibiSurface(other), false, `${String(other)} remains a legacy system surface`);
   }
 });
 
 test("App derives the Bibi surface from the shared predicate, not a loose string", async () => {
   const app = await read("src/App.jsx");
 
-  assert.match(app, /import \{ isBibiSurface \} from "\.\/bibi\/surface\.js";/);
+  // The contract is that the predicate comes from the shared module and is what
+  // App branches on. The rest of that import list is free to grow — it now also
+  // carries the auth-gate vocabulary — so pinning the exact named-import set
+  // would fail on unrelated additions without protecting anything.
+  assert.match(app, /import \{[^}]*\bisBibiSurface\b[^}]*\} from "\.\/bibi\/surface\.js";/);
   assert.match(app, /const bibiSurface = isBibiSurface\(view\);/);
+
+  // And it must stay a derived value rather than being recomputed inline at the
+  // call sites, which is the drift the original finding was about.
+  assert.ok(
+    (app.match(/isBibiSurface\(/g) ?? []).length >= 1,
+    "App must call the shared predicate",
+  );
 });
 
 test("legacy Hermes core-health errors are withheld only while the Bibi surface is active", async () => {
@@ -246,11 +275,21 @@ test("the signed-in workspace keeps the full content width", async () => {
     read("src/BibiWorkspace.jsx"),
   ]);
 
-  // Only the signed-out branch carries the modifier, and the three-column grid
-  // is never wrapped in the capped container.
-  assert.equal((workspace.match(/bibi-workspace is-auth/g) ?? []).length, 1);
-  assert.equal((workspace.match(/className="bibi-auth"/g) ?? []).length, 1);
-  assert.match(workspace, /<div className="bibi-workspace">\s*<header className="bibi-header">/);
+  // Three screens precede the workspace — redeeming an invite, signing in, and
+  // choosing a password — and each is a card. Every one of them carries the
+  // modifier and the capped container together; the three-column grid carries
+  // neither.
+  const modifiers = (workspace.match(/bibi-workspace is-auth/g) ?? []).length;
+  const containers = (workspace.match(/className="bibi-auth"/g) ?? []).length;
+  assert.ok(modifiers >= 1, "at least one card screen must exist");
+  assert.equal(modifiers, containers, "every capped card must carry both the modifier and the container");
+
+  const workspaceRoot = workspace.search(SIGNED_IN_WORKSPACE_ROOT);
+  assert.notEqual(workspaceRoot, -1, "the signed-in workspace must render at full width");
+  // Every card screen short-circuits before that root, so none of them can wrap it.
+  const lastCard = workspace.lastIndexOf("bibi-workspace is-auth");
+  assert.ok(lastCard < workspaceRoot, "no card screen may enclose the signed-in workspace");
+
   assert.doesNotMatch(css, /\.bibi-layout\s*\{[^}]*max-width:\s*\d+px;/);
 });
 

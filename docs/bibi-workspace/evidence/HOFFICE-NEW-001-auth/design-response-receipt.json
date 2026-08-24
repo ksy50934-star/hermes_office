@@ -1,0 +1,381 @@
+{
+  "document": "design-response-receipt",
+  "task_id": "HOFFICE-NEW-001-AUTH",
+  "responds_to": {
+    "review": "bibi-06 design session",
+    "session": "20260824_014100_b68799",
+    "verdict_received": "FAIL",
+    "receipt_observed_by_reviewer_sha256": "e656e692d06f585d658080f5eef4488ec2c4fc79c9dd1a8ec9f0ab75a06b48cf",
+    "note": "The reviewer observed a receipt generation that has since been superseded. This response opens a new sealed generation; see evidence-manifest.json."
+  },
+  "writer_session_id": "a656c64e-2d11-4a17-9133-f8d8f5bdace5",
+  "policies_applied": [
+    "POL-CORE-CERTAINTY-001@1.0.0",
+    "POL-WORK-INTAKE-EXECUTION-001@1.1.0"
+  ],
+  "verdict": "ALL_FINDINGS_ADDRESSED",
+  "completion_claimed": false,
+  "findings": [
+    {
+      "id": "D1",
+      "finding": ".bibi-field-hint used an opacity-only treatment, with no explicit colour and below the readable size floor",
+      "why_it_mattered": "This text states the password rules, so a reader who cannot resolve it cannot satisfy the field. `opacity` multiplies against whatever surface is behind it, which makes the resulting contrast unknowable rather than merely low — it cannot be checked, only guessed at.",
+      "change": "Removed `opacity`. Declared an explicit ink colour (#4a4f4c) and raised the size to 0.8rem.",
+      "file": "src/bibiWorkspace.css",
+      "measured_in_browser": {
+        "font_size_px": 12.8,
+        "opacity": 1,
+        "computed_color": "rgb(74, 79, 76)",
+        "contrast_ratio": 7.25,
+        "threshold": "WCAG AA body text is 4.5:1; 0.8rem is 12.8px at the default root size",
+        "viewports": [
+          360,
+          390,
+          1440
+        ]
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "D2",
+      "finding": ".bibi-signout.bibi-abandon lacked a 44px minimum, a clear focus-visible state, and adequate padding",
+      "why_it_mattered": "Secondary is a matter of emphasis, not of size. A control small enough to miss is not a quieter control, it is a broken one — and keyboard users had no visible focus affordance at all.",
+      "change": "min-height 44px, padding 10px 18px, and a dedicated :focus-visible outline with offset shared with .bibi-signout. Kept transparent background and pill shape so it stays below the primary CTA in hierarchy.",
+      "file": "src/bibiWorkspace.css",
+      "measured_in_browser": {
+        "height_px": 44,
+        "width_px": 83.41,
+        "resolved_padding": "10px 18px",
+        "background": "rgba(0, 0, 0, 0)",
+        "still_secondary": true,
+        "viewports": [
+          360,
+          390,
+          1440
+        ]
+      },
+      "defect_found_by_measurement": {
+        "what": "The first fix declared the padding on a single-class `.bibi-abandon` rule. `.bibi-signout` is declared later at equal specificity, so it won on source order: the source read 10px/18px while the browser resolved 4px/10px.",
+        "how_found": "The pixel measurement disagreed with the stylesheet. A source-level assertion had already passed on the declared value.",
+        "fix": "Selector raised to `.bibi-signout.bibi-abandon`, in the base rule and in the 380px override. A regression test now fails if a single-class `.bibi-abandon` rule reappears."
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "D3",
+      "finding": ".bibi-error signalled failure by colour alone and shifted the layout when it appeared",
+      "why_it_mattered": "Red-green colour blindness is common enough that 'the text turned red' is not a signal, and on a translucent card a tinted sentence reads as ordinary prose. Separately, the message appearing pushed the submit button down and out from under a cursor already moving toward it.",
+      "change": "The state is now carried by a tinted panel, a 3px leading rule, a 1px border and a `!` glyph that survives greyscale and a failed stylesheet. The glyph is aria-hidden by construction (::before) while the sentence keeps role=\"alert\". A always-present .bibi-error-slot reserves one line's height in both auth forms.",
+      "files": [
+        "src/bibiWorkspace.css",
+        "src/BibiWorkspace.jsx"
+      ],
+      "measured_in_browser": {
+        "local": {
+          "errorStyle": [
+            {
+              "borderTopWidthPx": 1,
+              "borderLeftWidthPx": 3,
+              "backgroundColor": "rgba(184, 69, 47, 0.09)",
+              "backgroundIsTransparent": false,
+              "paddingLeftPx": 30,
+              "markerContent": "\"!\"",
+              "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+            },
+            {
+              "borderTopWidthPx": 1,
+              "borderLeftWidthPx": 3,
+              "backgroundColor": "rgba(184, 69, 47, 0.09)",
+              "backgroundIsTransparent": false,
+              "paddingLeftPx": 30,
+              "markerContent": "\"!\"",
+              "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+            },
+            {
+              "borderTopWidthPx": 1,
+              "borderLeftWidthPx": 3,
+              "backgroundColor": "rgba(184, 69, 47, 0.09)",
+              "backgroundIsTransparent": false,
+              "paddingLeftPx": 30,
+              "markerContent": "\"!\"",
+              "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+            }
+          ],
+          "layoutShift": [
+            {
+              "submitTopBeforePx": 383,
+              "submitTopAfterPx": 383,
+              "shiftPx": 0
+            },
+            {
+              "submitTopBeforePx": 407,
+              "submitTopAfterPx": 407,
+              "shiftPx": 0
+            },
+            {
+              "submitTopBeforePx": 425,
+              "submitTopAfterPx": 425,
+              "shiftPx": 0
+            }
+          ]
+        },
+        "production": [
+          {
+            "viewport": "360",
+            "layout_shift_px": 0,
+            "border_top_px": 1,
+            "border_left_px": 3,
+            "background_transparent": false,
+            "marker": "\"!\""
+          },
+          {
+            "viewport": "390",
+            "layout_shift_px": 0,
+            "border_top_px": 1,
+            "border_left_px": 3,
+            "background_transparent": false,
+            "marker": "\"!\""
+          },
+          {
+            "viewport": "1440",
+            "layout_shift_px": 0,
+            "border_top_px": 1,
+            "border_left_px": 3,
+            "background_transparent": false,
+            "marker": "\"!\""
+          }
+        ],
+        "layout_shift_px_all_viewports": 0
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "D4",
+      "finding": "The signed-out shell presented pre-auth operations and navigation as if available",
+      "why_it_mattered": "The chrome around the sign-in card advertised an office, meetings, a work board and a green 'system healthy' pill to someone who had not authenticated and, in the case of the pill, on the strength of a measurement the browser had never taken.",
+      "change": "The workspace now reports an auth gate up to the shell through a shared vocabulary in src/bibi/surface.js, defaulting to LOCKED so the first frame cannot flash an open shell. While locked, every destination except the sign-in surface itself is disabled in fact — the DOM `disabled` property, aria-disabled, no click handler at all — and marked with the word 잠김, a not-allowed cursor and reduced emphasis. The status pill reads 로그인 필요 / 인증 후 이용 가능 instead of claiming health.",
+      "files": [
+        "src/bibi/surface.js",
+        "src/BibiWorkspace.jsx",
+        "src/App.jsx",
+        "src/bibiWorkspace.css"
+      ],
+      "gates_covered": [
+        "unconfigured cloud",
+        "invite mid-redemption",
+        "signed out",
+        "signed in but password not yet set"
+      ],
+      "signed_in_shell_impact": "None. Every lock rule is scoped under .app-shell.is-auth-locked and the gate is only ever consulted on the Bibi surface; a test asserts both.",
+      "measured_in_browser": {
+        "local": [
+          {
+            "fieldHint": null,
+            "abandonButton": null,
+            "errorSlot": {
+              "heightPx": 38,
+              "isEmpty": true
+            },
+            "shellLocked": true,
+            "lockedNavCount": 11,
+            "lockedNavAllDisabled": true,
+            "lockedNavAllAriaDisabled": true,
+            "lockedNavHaveTextMarker": true,
+            "lockedDockCount": 6,
+            "lockedDockAllDisabled": true,
+            "unlockedNavCount": 1,
+            "statusText": "로그인 필요",
+            "horizontalOverflow": false,
+            "documentWidth": 360,
+            "viewportWidth": 360
+          },
+          {
+            "fieldHint": null,
+            "abandonButton": null,
+            "errorSlot": {
+              "heightPx": 38,
+              "isEmpty": true
+            },
+            "shellLocked": true,
+            "lockedNavCount": 11,
+            "lockedNavAllDisabled": true,
+            "lockedNavAllAriaDisabled": true,
+            "lockedNavHaveTextMarker": true,
+            "lockedDockCount": 6,
+            "lockedDockAllDisabled": true,
+            "unlockedNavCount": 1,
+            "statusText": "로그인 필요",
+            "horizontalOverflow": false,
+            "documentWidth": 390,
+            "viewportWidth": 390
+          },
+          {
+            "fieldHint": null,
+            "abandonButton": null,
+            "errorSlot": {
+              "heightPx": 38,
+              "isEmpty": true
+            },
+            "shellLocked": true,
+            "lockedNavCount": 11,
+            "lockedNavAllDisabled": true,
+            "lockedNavAllAriaDisabled": true,
+            "lockedNavHaveTextMarker": true,
+            "lockedDockCount": 6,
+            "lockedDockAllDisabled": true,
+            "unlockedNavCount": 1,
+            "statusText": "로그인 필요",
+            "horizontalOverflow": false,
+            "documentWidth": 1440,
+            "viewportWidth": 1440
+          }
+        ],
+        "production": [
+          {
+            "viewport": "360",
+            "shell_locked": true,
+            "locked_nav_count": 11,
+            "locked_nav_all_disabled": true,
+            "locked_nav_all_aria_disabled": true,
+            "locked_nav_text_marker": true,
+            "locked_dock_all_disabled": true,
+            "status_text": "로그인 필요"
+          },
+          {
+            "viewport": "390",
+            "shell_locked": true,
+            "locked_nav_count": 11,
+            "locked_nav_all_disabled": true,
+            "locked_nav_all_aria_disabled": true,
+            "locked_nav_text_marker": true,
+            "locked_dock_all_disabled": true,
+            "status_text": "로그인 필요"
+          },
+          {
+            "viewport": "1440",
+            "shell_locked": true,
+            "locked_nav_count": 11,
+            "locked_nav_all_disabled": true,
+            "locked_nav_all_aria_disabled": true,
+            "locked_nav_text_marker": true,
+            "locked_dock_all_disabled": true,
+            "status_text": "로그인 필요"
+          }
+        ]
+      },
+      "deliberate_tradeoff": {
+        "what": "Signed out, the legacy Hermes views are no longer reachable from the navigation.",
+        "why_acceptable": "Those views talk to a local Hermes gateway through the dev proxy; in the deployed product there is no such proxy, so they are already non-functional on Production. Locking them signed-out removes an advertisement, not a capability. They remain reachable by explicit ?view= URL for local development.",
+        "recorded_rather_than_assumed": true
+      },
+      "status": "PASS"
+    }
+  ],
+  "stale_test_corrected": {
+    "test": "tests/bibiWorkspaceVisual.test.js — 'App derives the Bibi surface from the shared predicate, not a loose string'",
+    "was": "pinned the exact named-import set: import { isBibiSurface } from \"./bibi/surface.js\"",
+    "failed_because": "the import list legitimately grew to carry the auth-gate vocabulary",
+    "now": "asserts isBibiSurface is imported from the shared module and is what App branches on, regardless of what else is imported alongside",
+    "invariant_weakened": false,
+    "note": "The protected property — the surface is derived from the shared predicate rather than a loose string — is unchanged and still asserted."
+  },
+  "tests_added": {
+    "file": "tests/bibiAuthAccessibility.test.js",
+    "count": 16,
+    "covers": [
+      "D1 colour and size",
+      "D2 target size, padding specificity and focus-visible",
+      "D3 non-colour cue and reserved space",
+      "D4 gate vocabulary, locked-in-fact navigation, and signed-in shell isolation"
+    ]
+  },
+  "verification": {
+    "eslint": {
+      "exit_code": 0
+    },
+    "full_test_suite": {
+      "tests": 603,
+      "pass": 603,
+      "fail": 0,
+      "skipped": 0,
+      "todo": 0,
+      "exit_code": 0
+    },
+    "build": {
+      "exit_code": 0
+    },
+    "package_verification": {
+      "exit_code": 0,
+      "files_scanned": 279
+    },
+    "git_diff_check": {
+      "exit_code": 0
+    },
+    "focused_suites": {
+      "tests/bibiAuthAccessibility.test.js": 16,
+      "tests/bibiWorkspaceVisual.test.js": 16,
+      "tests/bibiAuthCallback.test.js": 24,
+      "tests/bibiPasswordSetup.test.js": 28,
+      "tests/bibiAuthSurface.test.js": 23,
+      "tests/supabaseRlsBoundary.test.js": 14,
+      "tests/bibiConnectorWarningBoundary.test.js": 21,
+      "tests/bibiAuthTransitionScroll.test.js": 15
+    }
+  },
+  "pixel_capture": {
+    "viewports": [
+      360,
+      390,
+      1440
+    ],
+    "local": {
+      "verdict": "PASS",
+      "findings_passed": 5,
+      "findings_total": 5,
+      "scenes": 6,
+      "all_found": true
+    },
+    "production": {
+      "verdict": "PASS",
+      "findings_passed": 5,
+      "findings_total": 5,
+      "all_found": true
+    },
+    "console_errors": {
+      "local_total": 6,
+      "production_total": 3,
+      "classification": "Not product defects. Local: the deliberate 400 from the stub's reject-me@example.invalid route, plus a websocket the stub does not implement. Production: only the 400 from the deliberately rejected sign-in probe, one per viewport."
+    }
+  },
+  "supabase_auth_state_verified": {
+    "method": "public, unauthenticated readback only — no credential, no CLI write, no config change",
+    "disable_signup": true,
+    "signup_probe": "422 signup_disabled",
+    "site_url_observed": "https://bibi-workspace-18.vercel.app",
+    "production_in_redirect_allowlist": true,
+    "how_site_url_was_read_without_credentials": "/auth/v1/verify validates redirect_to against the allowlist and falls back to site_url when the target is not allowed. A probe with an allowed target confirms the allowlist; a probe with a deliberately foreign target makes the server name site_url itself. Both used a bogus token, so nothing was consumed or created.",
+    "improvement_over_prior_generation": "The prior receipt recorded site_url and the allowlist as orchestrator-reported and not publicly verifiable. They are now verified directly by this writer.",
+    "rls_expectations": "9/9 PASS",
+    "cloud_auth_config_modified_by_this_run": false
+  },
+  "constraints_observed": {
+    "password_never_sought_read_logged_or_reused": true,
+    "secrets_never_read_or_printed": true,
+    "git_commit_push_pr_fetch_pull_checkout_reset_stash_remote": "none performed",
+    "cloud_auth_config_modified": false,
+    "vercel_project": "existing bibi-workspace-18 only; no project created or reused",
+    "bibi_10_started": false
+  },
+  "blockers": [
+    {
+      "id": "A22",
+      "status": "BLOCKED",
+      "reason": "Owner must personally accept the invite and set a password. That value must never be sought, read, logged or reused by any agent."
+    },
+    {
+      "id": "A23",
+      "status": "BLOCKED",
+      "reason": "Authenticated chat/work round trip and signed-in browser QA depend on A22."
+    }
+  ]
+}

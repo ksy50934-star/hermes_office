@@ -12,6 +12,7 @@
  */
 
 import { getSupabaseClient } from "./supabaseBrowser.js";
+import { AUTH_CALLBACK } from "../bibi/authCallback.js";
 import { BIBI_PROFILE_IDS } from "../bibi/roster.js";
 import { describeConnectorHealth } from "../bibi/connectionState.js";
 
@@ -50,6 +51,47 @@ export function signInWithPassword(email, password) {
 
 export function signOut() {
   return client().auth.signOut();
+}
+
+/**
+ * Turn the proof an invite link came back with into a session.
+ *
+ * Which call applies is decided by the shape the link arrived in, which
+ * `bibi/authCallback.js` has already classified. Errors are returned rather
+ * than thrown so the caller can render one wording for every failure path.
+ */
+export async function establishSessionFromCallback(callback) {
+  const auth = client().auth;
+
+  if (callback?.kind === AUTH_CALLBACK.TOKENS) {
+    return auth.setSession({
+      access_token: callback.tokens.accessToken,
+      refresh_token: callback.tokens.refreshToken,
+    });
+  }
+
+  if (callback?.kind === AUTH_CALLBACK.TOKEN_HASH) {
+    // `type` is passed through verbatim: GoTrue distinguishes an invite hash
+    // from a recovery hash, and guessing would burn the token.
+    return auth.verifyOtp({ token_hash: callback.tokenHash, type: callback.type || "invite" });
+  }
+
+  if (callback?.kind === AUTH_CALLBACK.CODE) {
+    return auth.exchangeCodeForSession(callback.code);
+  }
+
+  return { data: { session: null }, error: new Error("UNSUPPORTED_AUTH_CALLBACK") };
+}
+
+/**
+ * Set the signed-in user's own password.
+ *
+ * This is the only write to a credential the app makes, and it is made by the
+ * account holder against their own session. The value is handed straight to
+ * Supabase and is never stored, echoed or logged on the way.
+ */
+export function updatePassword(password) {
+  return client().auth.updateUser({ password });
 }
 
 async function authorizedHeaders() {
@@ -270,6 +312,92 @@ export async function transitionWork({ workItemId, type, profileId = null, reaso
 }
 
 // ---------------------------------------------------------------------------
+// Meetings, archive and data room
+// ---------------------------------------------------------------------------
+
+export async function startMeeting({ topic, profileIds }) {
+  const unique = [...new Set((profileIds ?? []).filter((id) => BIBI_PROFILE_IDS.includes(id)))];
+  if (!String(topic ?? "").trim()) throw new Error("회의 주제를 입력해 주세요.");
+  if (!unique.length) throw new Error("실제 비비를 한 명 이상 선택해 주세요.");
+  const result = await client().rpc("bibi_start_meeting", {
+    p_topic: String(topic).trim(),
+    p_profile_ids: unique,
+  });
+  if (result.error) throw new Error(`startMeeting: ${result.error.message}`);
+  return result.data;
+}
+
+export async function loadMeetings() {
+  const supabase = client();
+  const [meetings, participants, work, results] = await Promise.all([
+    supabase.from("bibi_meetings").select("id, topic, status, created_at, completed_at")
+      .order("created_at", { ascending: false }).limit(50),
+    supabase.from("bibi_meeting_participants").select("id, meeting_id, profile_id, work_item_id, created_at")
+      .order("created_at"),
+    supabase.from("work_items").select("id, meeting_id, profile_id, status, attempt, error, result_id, created_at, updated_at")
+      .eq("kind", "meeting").order("created_at"),
+    supabase.from("work_results").select("id, work_item_id, summary, detail, created_at").order("created_at"),
+  ]);
+  const rows = unwrap(meetings, "loadMeetings.meetings");
+  const participantRows = unwrap(participants, "loadMeetings.participants");
+  const workRows = unwrap(work, "loadMeetings.work");
+  const resultRows = unwrap(results, "loadMeetings.results");
+  const workById = new Map(workRows.map((item) => [item.id, item]));
+  const resultsByWork = new Map(resultRows.map((item) => [item.work_item_id, item]));
+  return rows.map((meeting) => ({
+    ...meeting,
+    participants: participantRows.filter((item) => item.meeting_id === meeting.id).map((item) => {
+      const workItem = workById.get(item.work_item_id) ?? null;
+      return { ...item, work: workItem, result: resultsByWork.get(item.work_item_id) ?? null };
+    }),
+  }));
+}
+
+export async function loadConversationArchive() {
+  const supabase = client();
+  const [conversations, messages] = await Promise.all([
+    supabase.from("conversations").select("id, profile_id, title, last_message_at, created_at")
+      .order("last_message_at", { ascending: false, nullsFirst: false }).limit(200),
+    supabase.from("messages").select("id, conversation_id, profile_id, role, body, created_at")
+      .order("created_at").limit(2000),
+  ]);
+  const conversationRows = unwrap(conversations, "loadConversationArchive.conversations");
+  const messageRows = unwrap(messages, "loadConversationArchive.messages");
+  return conversationRows.map((conversation) => ({
+    ...conversation,
+    messages: messageRows.filter((message) => message.conversation_id === conversation.id),
+  }));
+}
+
+export async function loadDataRoomArtifacts() {
+  const supabase = client();
+  const [work, results, evidence] = await Promise.all([
+    supabase.from("work_items").select("id, profile_id, kind, title, status, result_id, meeting_id, created_at, updated_at")
+      .order("created_at", { ascending: false }).limit(300),
+    supabase.from("work_results").select("id, work_item_id, summary, detail, created_at")
+      .order("created_at", { ascending: false }).limit(500),
+    supabase.from("work_evidence").select("id, work_item_id, kind, label, sha256, byte_size, storage_path, inline_excerpt, execution_profile_id, created_at")
+      .order("created_at", { ascending: false }).limit(1000),
+  ]);
+  const workRows = unwrap(work, "loadDataRoomArtifacts.work");
+  const resultRows = unwrap(results, "loadDataRoomArtifacts.results");
+  const evidenceRows = unwrap(evidence, "loadDataRoomArtifacts.evidence");
+  const resultsByWork = new Map();
+  for (const result of resultRows) {
+    if (!resultsByWork.has(result.work_item_id)) resultsByWork.set(result.work_item_id, []);
+    resultsByWork.get(result.work_item_id).push(result);
+  }
+  const evidenceByWork = new Map();
+  for (const item of evidenceRows) {
+    if (!evidenceByWork.has(item.work_item_id)) evidenceByWork.set(item.work_item_id, []);
+    evidenceByWork.get(item.work_item_id).push(item);
+  }
+  return workRows
+    .map((item) => ({ ...item, results: resultsByWork.get(item.id) ?? [], evidence: evidenceByWork.get(item.id) ?? [] }))
+    .filter((item) => item.results.length || item.evidence.length);
+}
+
+// ---------------------------------------------------------------------------
 // Realtime
 // ---------------------------------------------------------------------------
 
@@ -277,36 +405,110 @@ export async function transitionWork({ workItemId, type, profileId = null, reaso
  * Subscribe to the tables the workspace renders. Realtime respects RLS, so this
  * only ever delivers the signed-in owner's rows.
  *
+ * The order below is the whole point of this function.
+ *
+ * Realtime authenticates over its own websocket, and the JWT it uses is the one
+ * the socket held when the channel joined — not whatever the auth client knows
+ * later. Creating the channel first and letting the token arrive afterwards
+ * produces a channel that joins as `anon`, and under RLS `anon` matches no row,
+ * so the subscription reports SUBSCRIBED and then delivers nothing. That is the
+ * failure this was written against: a live two-account run received zero owner
+ * events until `realtime.setAuth` was called *before* subscribe, and one owner
+ * event with zero cross-account leakage once it was.
+ *
+ * So: read the session, set the socket's JWT, and only then create and join the
+ * channel. With no session and no token there is nothing to authorise, so this
+ * subscribes to nothing rather than joining anonymously.
+ *
+ * Establishing that is asynchronous and unsubscribing is not, so the returned
+ * disposer is usable on the line after the call — including before the channel
+ * exists. Disposal is checked at every point the work could resume, and a
+ * channel that is created anyway is removed rather than left joined: an effect
+ * that unmounts mid-handshake must not leave a live subscription behind.
+ *
  * `onResync` fires when the socket reconnects: realtime gives no replay of what
  * was missed while the tab was asleep, so the caller must refetch rather than
  * assume its cache is still current.
  */
-export function subscribeToWorkspace({ onWorkItem, onWorkEvent, onMessage, onConnector, onResync } = {}) {
-  const supabase = getSupabaseClient();
+export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onResync } = {}) {
   if (!supabase) return () => {};
 
+  let disposed = false;
+  let channel = null;
   let connectedOnce = false;
-  const channel = supabase.channel("bibi-workspace");
 
-  const bind = (table, handler) => {
-    if (!handler) return;
-    channel.on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
-      handler(payload.new ?? payload.old, payload);
-    });
+  const attach = (target) => {
+    const bind = (table, handler) => {
+      if (!handler) return;
+      target.on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
+        // A payload that arrives after disposal is a message already in flight
+        // when the channel was removed. Rendering it would write into a caller
+        // that has already torn down.
+        if (disposed) return;
+        handler(payload.new ?? payload.old, payload);
+      });
+    };
+
+    bind("work_items", onWorkItem);
+    bind("work_events", onWorkEvent);
+    bind("messages", onMessage);
+    bind("connector_nodes", onConnector);
+    bind("bibi_meetings", onMeeting);
+    bind("bibi_meeting_participants", onMeetingParticipant);
+    bind("work_results", onResult);
+    bind("work_evidence", onEvidence);
   };
 
-  bind("work_items", onWorkItem);
-  bind("work_events", onWorkEvent);
-  bind("messages", onMessage);
-  bind("connector_nodes", onConnector);
+  (async () => {
+    let accessToken;
+    try {
+      const { data } = await supabase.auth.getSession();
+      accessToken = data?.session?.access_token ?? null;
+    } catch {
+      // An unreadable session is the same as no session here: there is no token
+      // to authorise the socket with, so nothing is joined.
+      accessToken = null;
+    }
+    if (disposed || !accessToken) return;
 
-  channel.subscribe((status) => {
-    if (status !== "SUBSCRIBED") return;
-    if (connectedOnce) onResync?.();
-    connectedOnce = true;
-  });
+    // Awaited: in supabase-js this returns a promise, and joining before it
+    // settles is exactly the race this function exists to close.
+    await supabase.realtime.setAuth(accessToken);
+    if (disposed) return;
+
+    const next = supabase.channel("bibi-workspace");
+    // Assigned before subscribe, so a disposal racing the join still has
+    // something to remove.
+    channel = next;
+    attach(next);
+    next.subscribe((status) => {
+      if (disposed) return;
+      if (status !== "SUBSCRIBED") return;
+      if (connectedOnce) onResync?.();
+      connectedOnce = true;
+    });
+
+    if (disposed) {
+      channel = null;
+      supabase.removeChannel(next);
+    }
+  })();
 
   return () => {
-    supabase.removeChannel(channel);
+    disposed = true;
+    if (!channel) return;
+    const current = channel;
+    channel = null;
+    supabase.removeChannel(current);
   };
+}
+
+/**
+ * The browser's binding of the above: same behaviour, against the one real
+ * client. The client is a parameter of `createWorkspaceSubscription` rather
+ * than something it reaches for, so the ordering contract can be exercised
+ * against a double instead of a live socket.
+ */
+export function subscribeToWorkspace(handlers = {}) {
+  return createWorkspaceSubscription(getSupabaseClient(), handlers);
 }

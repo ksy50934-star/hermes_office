@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BibiWorkspace from "./BibiWorkspace.jsx";
-import { isBibiSurface } from "./bibi/surface.js";
+import { AUTH_GATE, isAuthLocked, isBibiSurface } from "./bibi/surface.js";
 import CommandCenter from "./CommandCenter.jsx";
 import DataRoom from "./DataRoom.jsx";
 import HermesOffice from "./HermesOffice.jsx";
@@ -1389,6 +1389,7 @@ function BrandLockup() {
 
 function OfficeApp() {
   const [view, setView] = useState(initialViewFromUrl);
+  const [bibiAuthGate, setBibiAuthGate] = useState(AUTH_GATE.LOCKED);
   const [workspace, setWorkspace] = useState(() => loadCachedWorkspace());
   const [organization, setOrganization] = useState({ version: 1, revision: 0, nodes: [], audit: [] });
   const [organizationStatus, setOrganizationStatus] = useState("loading");
@@ -1420,6 +1421,7 @@ function OfficeApp() {
   }));
   const [localNotification, setLocalNotification] = useState(null);
   const notificationTimerRef = useRef(0);
+  const bibiSurface = isBibiSurface(view);
 
   // The Bibi Workspace reports its own connector and cloud health, so a failing
   // legacy Hermes poll must not raise a banner over it. `refresh` is a stable
@@ -1456,6 +1458,7 @@ function OfficeApp() {
   }, []);
 
   useEffect(() => {
+    if (bibiSurface) return undefined;
     const initialLoad = window.setTimeout(refresh, 0);
     const timer = window.setInterval(refresh, 30000);
     window.addEventListener("hermes:refresh-workspace", refresh);
@@ -1464,7 +1467,7 @@ function OfficeApp() {
       window.clearInterval(timer);
       window.removeEventListener("hermes:refresh-workspace", refresh);
     };
-  }, [refresh]);
+  }, [refresh, bibiSurface]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -1478,7 +1481,9 @@ function OfficeApp() {
   }, []);
 
   const officeNotice = view === "office" && /승인|보류|검토|요청/.test(error);
-  const bibiSurface = isBibiSurface(view);
+  // Locked until the Bibi surface says otherwise, so the very first frame does
+  // not advertise a workspace to someone who has not signed in.
+  const authLocked = isAuthLocked(view, bibiAuthGate);
 
   useEffect(() => {
     if (!officeNotice) return undefined;
@@ -1992,7 +1997,7 @@ function OfficeApp() {
     : `${primaryActiveChatName} · ${primaryActiveChatText}`;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${authLocked ? "is-auth-locked" : ""}`}>
       <aside
         ref={mobileNavRef}
         id="primary-navigation"
@@ -2008,33 +2013,48 @@ function OfficeApp() {
           {NAV_GROUPS.map((group) => (
             <section key={group.label} className="nav-group">
               <span>{group.label}</span>
-              {group.items.map(([id, label, short]) => (
-                <button
-                  type="button"
-                  key={id}
-                  className={view === id ? "active" : ""}
-                  aria-current={view === id ? "page" : undefined}
-                  onClick={() => {
-                    if (id === "chat") setChatContext(null);
-                    navigate(id);
-                  }}
-                >
-                  <b>{short}</b>
-                  <strong>{label}</strong>
-                  {id === "meeting" && activeMeetings.length > 0 && <i />}
-                  {id === "chat" && activeChatCount > 0 && (
-                    <span className="nav-activity-count" title={activeChatSummary} aria-label={activeChatSummary}>{activeChatCount}</span>
-                  )}
-                </button>
-              ))}
+              {group.items.map(([id, label, short]) => {
+                // Signed out, every destination but the sign-in surface itself
+                // is unavailable. It is disabled rather than hidden so the
+                // shape of the product stays legible, and it is disabled in
+                // fact — not merely dimmed — so nothing here can be clicked
+                // into a screen that would have nothing to show.
+                const locked = authLocked && id !== "ceo";
+                return (
+                  <button
+                    type="button"
+                    key={id}
+                    className={`${view === id ? "active" : ""} ${locked ? "is-locked" : ""}`.trim()}
+                    aria-current={view === id ? "page" : undefined}
+                    disabled={locked}
+                    aria-disabled={locked ? "true" : undefined}
+                    title={locked ? "로그인 후 사용할 수 있습니다" : undefined}
+                    onClick={locked ? undefined : () => {
+                      if (id === "chat") setChatContext(null);
+                      navigate(id);
+                    }}
+                  >
+                    <b>{short}</b>
+                    <strong>{label}</strong>
+                    {locked && <span className="nav-lock" aria-hidden="true">잠김</span>}
+                    {!locked && id === "meeting" && activeMeetings.length > 0 && <i />}
+                    {!locked && id === "chat" && activeChatCount > 0 && (
+                      <span className="nav-activity-count" title={activeChatSummary} aria-label={activeChatSummary}>{activeChatCount}</span>
+                    )}
+                  </button>
+                );
+              })}
             </section>
           ))}
         </nav>
         <div className="sidebar-status">
-          <span className={systemHealthy ? "online" : connection} />
+          {/* Signed out, the browser has not asked the gateway anything, so a
+              green "시스템 정상" pill would be reporting health it never
+              measured. Say what is actually true instead: nobody is signed in. */}
+          <span className={authLocked ? "locked" : systemHealthy ? "online" : connection} />
           <div>
-            <strong>{systemHealthy ? "시스템 정상" : "연결 확인 중"}</strong>
-            <small>{workspace?.model?.model ?? "Hermes"}</small>
+            <strong>{authLocked ? "로그인 필요" : systemHealthy ? "시스템 정상" : "연결 확인 중"}</strong>
+            <small>{authLocked ? "인증 후 이용 가능" : workspace?.model?.model ?? "Hermes"}</small>
           </div>
         </div>
       </aside>
@@ -2100,9 +2120,9 @@ function OfficeApp() {
           </div>
         )}
 
-        {view === "ceo" && <BibiWorkspace />}
+        {bibiSurface && <BibiWorkspace surface={view} onAuthGateChange={setBibiAuthGate} />}
 
-        {view === "command" && (
+        {!bibiSurface && view === "command" && (
           <CommandCenter
             workspace={workspaceForViews}
             missions={missions}
@@ -2117,7 +2137,7 @@ function OfficeApp() {
           />
         )}
 
-        {view === "office" && (
+        {!bibiSurface && view === "office" && (
           <HermesOffice
             workspace={workspaceForViews}
             missions={missions}
@@ -2140,7 +2160,7 @@ function OfficeApp() {
           />
         )}
 
-        {view === "meeting" && activeMeetings.length > 0 && (
+        {!bibiSurface && view === "meeting" && activeMeetings.length > 0 && (
           <nav className="meeting-runtime-tabs" aria-label="열린 회의" role="tablist">
             {activeMeetings.map((meeting) => (
               <div key={meeting.id} className={`meeting-runtime-tab ${selectedMeetingId === meeting.id ? "active" : ""}`}>
@@ -2167,7 +2187,7 @@ function OfficeApp() {
           </nav>
         )}
 
-        {activeMeetings.map((meeting) => (
+        {!bibiSurface && activeMeetings.map((meeting) => (
           <div key={meeting.id} className="meeting-console-host" hidden={view !== "meeting" || selectedMeetingId !== meeting.id}>
             <MeetingConsole
               meeting={meeting}
@@ -2181,7 +2201,7 @@ function OfficeApp() {
           </div>
         ))}
 
-        {view === "meeting" && !activeMeeting && (
+        {!bibiSurface && view === "meeting" && !activeMeeting && (
           <MeetingLobby
             profiles={profiles}
             activeMeetings={activeMeetings}
@@ -2191,14 +2211,15 @@ function OfficeApp() {
           />
         )}
 
-        {view === "kanban" && (
+        {!bibiSurface && view === "kanban" && (
           <HermesKanban onOpenAgent={startChat} onStartMeeting={startMeeting} />
         )}
 
-        {view === "data" && (
+        {!bibiSurface && view === "data" && (
           <DataRoom onStartChat={startChat} onStartMeeting={startMeeting} />
         )}
 
+        {!bibiSurface && (
         <section
           className={`page-card chat-page persistent-chat-runtime ${view === "chat" ? "" : "is-background"}`}
           aria-hidden={view !== "chat"}
@@ -2225,8 +2246,9 @@ function OfficeApp() {
               legacyRealtime={!bibiSurface}
             />
         </section>
+        )}
 
-        {view === "sessions" && (
+        {!bibiSurface && view === "sessions" && (
           <section className="page-card sessions-page">
             <PageIntro
               eyebrow="CONVERSATION ARCHIVE"
@@ -2247,7 +2269,7 @@ function OfficeApp() {
           </section>
         )}
 
-        {view === "team" && (
+        {!bibiSurface && view === "team" && (
           <section className="team-page">
             <TeamWorkspace
               profiles={profiles}
@@ -2294,25 +2316,31 @@ function OfficeApp() {
       </main>
 
       <nav className="mobile-dock" aria-label="모바일 빠른 이동">
-        {MOBILE_TABS.map(([id, label, short]) => (
-          <button
-            type="button"
-            key={id}
-            className={view === id ? "active" : ""}
-            aria-current={view === id ? "page" : undefined}
-            onClick={() => {
-              if (id === "chat") setChatContext(null);
-              navigate(id);
-            }}
-          >
-            <b>{short}</b>
-            <span>{label}</span>
-            {id === "meeting" && activeMeetings.length > 0 && <i />}
-            {id === "chat" && activeChatCount > 0 && (
-              <em className="mobile-activity-count" aria-label={activeChatSummary}>{activeChatCount}</em>
-            )}
-          </button>
-        ))}
+        {MOBILE_TABS.map(([id, label, short]) => {
+          const locked = authLocked && id !== "ceo";
+          return (
+            <button
+              type="button"
+              key={id}
+              className={`${view === id ? "active" : ""} ${locked ? "is-locked" : ""}`.trim()}
+              aria-current={view === id ? "page" : undefined}
+              disabled={locked}
+              aria-disabled={locked ? "true" : undefined}
+              title={locked ? "로그인 후 사용할 수 있습니다" : undefined}
+              onClick={locked ? undefined : () => {
+                if (id === "chat") setChatContext(null);
+                navigate(id);
+              }}
+            >
+              <b>{short}</b>
+              <span>{label}</span>
+              {!locked && id === "meeting" && activeMeetings.length > 0 && <i />}
+              {!locked && id === "chat" && activeChatCount > 0 && (
+                <em className="mobile-activity-count" aria-label={activeChatSummary}>{activeChatCount}</em>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       {mobileNav && (

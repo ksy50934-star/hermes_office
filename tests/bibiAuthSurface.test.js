@@ -151,3 +151,97 @@ test("the workspace offers no public sign-up anywhere", async () => {
   assert.doesNotMatch(source, /signUp/);
   assert.doesNotMatch(source, /회원가입|가입하기/);
 });
+
+// ---------------------------------------------------------------------------
+// Session restore
+// ---------------------------------------------------------------------------
+
+test("a returning visit restores a persisted session instead of re-asking", async () => {
+  const client = await read("src/cloud/workspaceClient.js");
+  const source = await read("src/BibiWorkspace.jsx");
+
+  assert.match(client, /export async function getSession/);
+  assert.match(client, /export function onAuthStateChange/);
+  assert.match(client, /auth\.getSession\(\)/);
+  assert.match(client, /auth\.onAuthStateChange\(/);
+
+  // Both halves are needed: getSession answers "am I signed in right now",
+  // onAuthStateChange keeps that answer true as the token refreshes.
+  assert.match(source, /getSession\(\)\.then\(/);
+  assert.match(source, /onAuthStateChange\(\(next\) =>/);
+  assert.match(source, /unsubscribe\?\.\(\)/);
+});
+
+test("a restored session is never clobbered by a slower lookup", async () => {
+  const source = await read("src/BibiWorkspace.jsx");
+  // The invite callback and the stored-session lookup race. The callback's
+  // session is the fresher of the two and must win.
+  assert.match(source, /setSession\(\(existing\) => existing \?\? current\)/);
+});
+
+test("a returning user with a password is not sent back to the setup screen", async () => {
+  const source = await read("src/BibiWorkspace.jsx");
+  // The setup screen is entered from the link or from a recorded obligation —
+  // never from the mere existence of a session.
+  const setupWrites = source.match(/setPasswordSetup\(true\)/g) ?? [];
+  assert.equal(setupWrites.length, 2, "exactly two entries: the invite link, and a recorded obligation");
+  assert.match(source, /if \(requiresPasswordSetup\(callback\)\) \{/);
+  assert.match(source, /if \(isPasswordSetupPending\(current\.user\?\.id\)\) setPasswordSetup\(true\);/);
+});
+
+// ---------------------------------------------------------------------------
+// Sign-out
+// ---------------------------------------------------------------------------
+
+test("signing out clears the local session even if the server call fails", async () => {
+  const source = await read("src/BibiWorkspace.jsx");
+  const handler = source.slice(
+    source.indexOf("const handleSignOut"),
+    source.indexOf("// ---- render"),
+  );
+
+  assert.ok(handler.includes("await signOut()"), "sign-out must reach the server");
+  assert.ok(handler.includes("catch"), "a failed sign-out must not strand the user signed in");
+  assert.ok(handler.includes("setSession(null)"), "the local session must be dropped either way");
+  assert.ok(handler.includes("setPasswordSetup(false)"));
+});
+
+test("signing out is reachable from the workspace and from the setup screen", async () => {
+  const source = await read("src/BibiWorkspace.jsx");
+  const buttons = source.match(/className="bibi-signout[^"]*"/g) ?? [];
+  assert.equal(buttons.length, 2, "one in the header, one on the setup screen");
+  assert.match(source, /onClick=\{handleSignOut\}/);
+});
+
+// ---------------------------------------------------------------------------
+// Failure wording
+// ---------------------------------------------------------------------------
+
+test("a failed invite is shown on the sign-in screen rather than a dead end", async () => {
+  const source = await read("src/BibiWorkspace.jsx");
+  assert.match(source, /<SignInPanel notice=\{signInNotice\} \/>/);
+  assert.match(source, /className="bibi-notice" role="status"/);
+
+  // A link that arrived already failed is explained from the link itself, with
+  // no round trip; a link Supabase then refused is explained from the result.
+  assert.match(source, /callback\?\.kind === AUTH_CALLBACK\.ERROR\s*\n?\s*\? describeCallbackError\(callback\)/);
+  assert.match(source, /setAuthNotice\(describeCallbackFailure\(\)\)/);
+});
+
+test("an invite still being redeemed does not ask for a password", async () => {
+  const source = await read("src/BibiWorkspace.jsx");
+  const pendingBranch = source.indexOf("if (callbackPending) {");
+  const signedOutBranch = source.indexOf("if (!session) {");
+  assert.notEqual(pendingBranch, -1);
+  assert.ok(pendingBranch < signedOutBranch, "the pending branch must come first");
+});
+
+test("no sign-in wording distinguishes a wrong password from an unknown account", () => {
+  // Every credential failure Supabase reports collapses to one sentence.
+  const wrong = describeAuthError({ message: "Invalid login credentials" });
+  for (const other of ["User not found", "Invalid login credentials"]) {
+    const message = describeAuthError({ message: other });
+    if (other === "Invalid login credentials") assert.equal(message, wrong);
+    assert.ok(!/없는 계정|가입되지|등록되지 않은/.test(message), message);
+  }
+});

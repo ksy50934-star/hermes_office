@@ -1,0 +1,491 @@
+{
+  "origin": "http://127.0.0.1:4601",
+  "dist": "/tmp/bibi-ev2",
+  "viewports": [
+    360,
+    390,
+    1440
+  ],
+  "scenes": 6,
+  "all_scenes_found": true,
+  "console_errors_total": 6,
+  "findings": [
+    {
+      "id": "F1",
+      "finding": "field hint: no opacity-only treatment, explicit high-contrast colour, min 0.8rem",
+      "measured": [
+        {
+          "fontSizePx": 12.8,
+          "opacity": 1,
+          "color": "rgb(74, 79, 76)",
+          "contrastRatio": 7.25
+        },
+        {
+          "fontSizePx": 12.8,
+          "opacity": 1,
+          "color": "rgb(74, 79, 76)",
+          "contrastRatio": 7.25
+        },
+        {
+          "fontSizePx": 12.8,
+          "opacity": 1,
+          "color": "rgb(74, 79, 76)",
+          "contrastRatio": 7.25
+        }
+      ],
+      "pass": true,
+      "basis": "0.8rem = 12.8px at the default root size; 4.5:1 is the WCAG AA threshold for body text"
+    },
+    {
+      "id": "F2",
+      "finding": "abandon control: 44px minimum, visible focus ring, adequate padding, still secondary",
+      "measured": [
+        {
+          "heightPx": 44,
+          "widthPx": 83.41,
+          "padding": "10px 18px",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "heightPx": 44,
+          "widthPx": 83.41,
+          "padding": "10px 18px",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "heightPx": 44,
+          "widthPx": 83.41,
+          "padding": "10px 18px",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ],
+      "pass": true,
+      "basis": "measured bounding box height at every viewport"
+    },
+    {
+      "id": "F3",
+      "finding": "error state: non-colour cue and reserved spacing",
+      "measured": {
+        "errorStyle": [
+          {
+            "borderTopWidthPx": 1,
+            "borderLeftWidthPx": 3,
+            "backgroundColor": "rgba(184, 69, 47, 0.09)",
+            "backgroundIsTransparent": false,
+            "paddingLeftPx": 30,
+            "markerContent": "\"!\"",
+            "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+          },
+          {
+            "borderTopWidthPx": 1,
+            "borderLeftWidthPx": 3,
+            "backgroundColor": "rgba(184, 69, 47, 0.09)",
+            "backgroundIsTransparent": false,
+            "paddingLeftPx": 30,
+            "markerContent": "\"!\"",
+            "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+          },
+          {
+            "borderTopWidthPx": 1,
+            "borderLeftWidthPx": 3,
+            "backgroundColor": "rgba(184, 69, 47, 0.09)",
+            "backgroundIsTransparent": false,
+            "paddingLeftPx": 30,
+            "markerContent": "\"!\"",
+            "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+          }
+        ],
+        "layoutShift": [
+          {
+            "submitTopBeforePx": 383,
+            "submitTopAfterPx": 383,
+            "shiftPx": 0
+          },
+          {
+            "submitTopBeforePx": 407,
+            "submitTopAfterPx": 407,
+            "shiftPx": 0
+          },
+          {
+            "submitTopBeforePx": 425,
+            "submitTopAfterPx": 425,
+            "shiftPx": 0
+          }
+        ]
+      },
+      "pass": true,
+      "basis": "border + non-transparent background + ::before glyph; submit button y-position unchanged when the error appears"
+    },
+    {
+      "id": "F4",
+      "finding": "signed-out shell: pre-auth navigation unmistakably locked",
+      "measured": [
+        {
+          "fieldHint": null,
+          "abandonButton": null,
+          "errorSlot": {
+            "heightPx": 38,
+            "isEmpty": true
+          },
+          "shellLocked": true,
+          "lockedNavCount": 11,
+          "lockedNavAllDisabled": true,
+          "lockedNavAllAriaDisabled": true,
+          "lockedNavHaveTextMarker": true,
+          "lockedDockCount": 6,
+          "lockedDockAllDisabled": true,
+          "unlockedNavCount": 1,
+          "statusText": "로그인 필요",
+          "horizontalOverflow": false,
+          "documentWidth": 360,
+          "viewportWidth": 360
+        },
+        {
+          "fieldHint": null,
+          "abandonButton": null,
+          "errorSlot": {
+            "heightPx": 38,
+            "isEmpty": true
+          },
+          "shellLocked": true,
+          "lockedNavCount": 11,
+          "lockedNavAllDisabled": true,
+          "lockedNavAllAriaDisabled": true,
+          "lockedNavHaveTextMarker": true,
+          "lockedDockCount": 6,
+          "lockedDockAllDisabled": true,
+          "unlockedNavCount": 1,
+          "statusText": "로그인 필요",
+          "horizontalOverflow": false,
+          "documentWidth": 390,
+          "viewportWidth": 390
+        },
+        {
+          "fieldHint": null,
+          "abandonButton": null,
+          "errorSlot": {
+            "heightPx": 38,
+            "isEmpty": true
+          },
+          "shellLocked": true,
+          "lockedNavCount": 11,
+          "lockedNavAllDisabled": true,
+          "lockedNavAllAriaDisabled": true,
+          "lockedNavHaveTextMarker": true,
+          "lockedDockCount": 6,
+          "lockedDockAllDisabled": true,
+          "unlockedNavCount": 1,
+          "statusText": "로그인 필요",
+          "horizontalOverflow": false,
+          "documentWidth": 1440,
+          "viewportWidth": 1440
+        }
+      ],
+      "pass": true,
+      "basis": "DOM `disabled` property, aria-disabled, the 잠김 text marker, and the status pill wording"
+    },
+    {
+      "id": "F5",
+      "finding": "no horizontal overflow at any captured width",
+      "measured": [
+        {
+          "scene": "signin-locked-shell",
+          "viewport": "360",
+          "overflow": false,
+          "doc": 360,
+          "vp": 360
+        },
+        {
+          "scene": "password-setup",
+          "viewport": "360",
+          "overflow": false,
+          "doc": 360,
+          "vp": 360
+        },
+        {
+          "scene": "signin-locked-shell",
+          "viewport": "390",
+          "overflow": false,
+          "doc": 390,
+          "vp": 390
+        },
+        {
+          "scene": "password-setup",
+          "viewport": "390",
+          "overflow": false,
+          "doc": 390,
+          "vp": 390
+        },
+        {
+          "scene": "signin-locked-shell",
+          "viewport": "1440",
+          "overflow": false,
+          "doc": 1440,
+          "vp": 1440
+        },
+        {
+          "scene": "password-setup",
+          "viewport": "1440",
+          "overflow": false,
+          "doc": 1440,
+          "vp": 1440
+        }
+      ],
+      "pass": true,
+      "basis": "documentElement.scrollWidth vs window.innerWidth"
+    }
+  ],
+  "verdict": "PASS",
+  "failed": [],
+  "results": [
+    {
+      "scene": "signin-locked-shell",
+      "viewport": "360",
+      "found": true,
+      "measurements": {
+        "fieldHint": null,
+        "abandonButton": null,
+        "errorSlot": {
+          "heightPx": 38,
+          "isEmpty": true
+        },
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "unlockedNavCount": 1,
+        "statusText": "로그인 필요",
+        "horizontalOverflow": false,
+        "documentWidth": 360,
+        "viewportWidth": 360
+      },
+      "layoutShift": {
+        "submitTopBeforePx": 383,
+        "submitTopAfterPx": 383,
+        "shiftPx": 0
+      },
+      "errorStyle": {
+        "borderTopWidthPx": 1,
+        "borderLeftWidthPx": 3,
+        "backgroundColor": "rgba(184, 69, 47, 0.09)",
+        "backgroundIsTransparent": false,
+        "paddingLeftPx": 30,
+        "markerContent": "\"!\"",
+        "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+      },
+      "errorScreenshot": "error-state-360.png",
+      "screenshot": "signin-locked-shell-360.png",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+      ]
+    },
+    {
+      "scene": "password-setup",
+      "viewport": "360",
+      "found": true,
+      "measurements": {
+        "fieldHint": {
+          "fontSizePx": 12.8,
+          "opacity": 1,
+          "color": "rgb(74, 79, 76)",
+          "contrastRatio": 7.25
+        },
+        "abandonButton": {
+          "heightPx": 44,
+          "widthPx": 83.41,
+          "padding": "10px 18px",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        "errorSlot": {
+          "heightPx": 38,
+          "isEmpty": true
+        },
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "unlockedNavCount": 1,
+        "statusText": "로그인 필요",
+        "horizontalOverflow": false,
+        "documentWidth": 360,
+        "viewportWidth": 360
+      },
+      "screenshot": "password-setup-360.png",
+      "consoleErrors": [
+        "WebSocket connection to 'ws://127.0.0.1:4601/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImJpYmktbG9jYWwtZXZpZGVuY2UiLCJleHAiOjE3ODc1MTIwMTB9.evidence"
+      ]
+    },
+    {
+      "scene": "signin-locked-shell",
+      "viewport": "390",
+      "found": true,
+      "measurements": {
+        "fieldHint": null,
+        "abandonButton": null,
+        "errorSlot": {
+          "heightPx": 38,
+          "isEmpty": true
+        },
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "unlockedNavCount": 1,
+        "statusText": "로그인 필요",
+        "horizontalOverflow": false,
+        "documentWidth": 390,
+        "viewportWidth": 390
+      },
+      "layoutShift": {
+        "submitTopBeforePx": 407,
+        "submitTopAfterPx": 407,
+        "shiftPx": 0
+      },
+      "errorStyle": {
+        "borderTopWidthPx": 1,
+        "borderLeftWidthPx": 3,
+        "backgroundColor": "rgba(184, 69, 47, 0.09)",
+        "backgroundIsTransparent": false,
+        "paddingLeftPx": 30,
+        "markerContent": "\"!\"",
+        "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+      },
+      "errorScreenshot": "error-state-390.png",
+      "screenshot": "signin-locked-shell-390.png",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+      ]
+    },
+    {
+      "scene": "password-setup",
+      "viewport": "390",
+      "found": true,
+      "measurements": {
+        "fieldHint": {
+          "fontSizePx": 12.8,
+          "opacity": 1,
+          "color": "rgb(74, 79, 76)",
+          "contrastRatio": 7.25
+        },
+        "abandonButton": {
+          "heightPx": 44,
+          "widthPx": 83.41,
+          "padding": "10px 18px",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        "errorSlot": {
+          "heightPx": 38,
+          "isEmpty": true
+        },
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "unlockedNavCount": 1,
+        "statusText": "로그인 필요",
+        "horizontalOverflow": false,
+        "documentWidth": 390,
+        "viewportWidth": 390
+      },
+      "screenshot": "password-setup-390.png",
+      "consoleErrors": [
+        "WebSocket connection to 'ws://127.0.0.1:4601/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImJpYmktbG9jYWwtZXZpZGVuY2UiLCJleHAiOjE3ODc1MTIwMTB9.evidence"
+      ]
+    },
+    {
+      "scene": "signin-locked-shell",
+      "viewport": "1440",
+      "found": true,
+      "measurements": {
+        "fieldHint": null,
+        "abandonButton": null,
+        "errorSlot": {
+          "heightPx": 38,
+          "isEmpty": true
+        },
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "unlockedNavCount": 1,
+        "statusText": "로그인 필요",
+        "horizontalOverflow": false,
+        "documentWidth": 1440,
+        "viewportWidth": 1440
+      },
+      "layoutShift": {
+        "submitTopBeforePx": 425,
+        "submitTopAfterPx": 425,
+        "shiftPx": 0
+      },
+      "errorStyle": {
+        "borderTopWidthPx": 1,
+        "borderLeftWidthPx": 3,
+        "backgroundColor": "rgba(184, 69, 47, 0.09)",
+        "backgroundIsTransparent": false,
+        "paddingLeftPx": 30,
+        "markerContent": "\"!\"",
+        "text": "이메일 또는 비밀번호가 올바르지 않습니다."
+      },
+      "errorScreenshot": "error-state-1440.png",
+      "screenshot": "signin-locked-shell-1440.png",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+      ]
+    },
+    {
+      "scene": "password-setup",
+      "viewport": "1440",
+      "found": true,
+      "measurements": {
+        "fieldHint": {
+          "fontSizePx": 12.8,
+          "opacity": 1,
+          "color": "rgb(74, 79, 76)",
+          "contrastRatio": 7.25
+        },
+        "abandonButton": {
+          "heightPx": 44,
+          "widthPx": 83.41,
+          "padding": "10px 18px",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        "errorSlot": {
+          "heightPx": 38,
+          "isEmpty": true
+        },
+        "shellLocked": true,
+        "lockedNavCount": 11,
+        "lockedNavAllDisabled": true,
+        "lockedNavAllAriaDisabled": true,
+        "lockedNavHaveTextMarker": true,
+        "lockedDockCount": 6,
+        "lockedDockAllDisabled": true,
+        "unlockedNavCount": 1,
+        "statusText": "로그인 필요",
+        "horizontalOverflow": false,
+        "documentWidth": 1440,
+        "viewportWidth": 1440
+      },
+      "screenshot": "password-setup-1440.png",
+      "consoleErrors": [
+        "WebSocket connection to 'ws://127.0.0.1:4601/realtime/v1/websocket?apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImJpYmktbG9jYWwtZXZpZGVuY2UiLCJleHAiOjE3ODc1MTIwMTB9.evidence"
+      ]
+    }
+  ]
+}
