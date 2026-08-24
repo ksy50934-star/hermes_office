@@ -44,7 +44,7 @@ behaviour regresses.
 | R20 | Timeout, bounded output, redaction | `classifyFailure`, `maxBuffer`, `redactSecrets` | `connectorCliExecutor.test.js` — timeout, runaway output, leaked token |
 | R21 | No secret reaches the child | `INHERITED_ENV_KEYS` allowlist | `connectorCliExecutor.test.js` — no `BIBI_*`/`SUPABASE*` in child env |
 | R22 | `listProfileIds` reports only present homes | `stat` per expected profile | `connectorCliExecutor.test.js` |
-| R23 | No local state reads | `stat` only | `connectorCliExecutor.test.js` source scan; `connectorOutbound.test.js` evidence refusals |
+| R23 | No arbitrary local-state or evidence reads; the continuity reader has a narrow projection allowlist | executor `stat` only; `messageProjection.js` explicit SQL columns | `connectorCliExecutor.test.js`, `connectorOutbound.test.js`, `messageProjection.test.js` |
 
 ## Topology and boundaries
 
@@ -60,10 +60,22 @@ behaviour regresses.
 | R31 | Lifecycle, leases, idempotency | `src/bibi/workLifecycle.js`, `bibi_claim_work` | `bibiWorkLifecycle.test.js`, `bibiIdempotency.test.js` |
 | R32 | Vercel + environment contract | `vercel.json`, `.env.cloud.example` | `vercelDeploymentContract.test.js` |
 
+## Cross-channel conversation continuity
+
+| # | Requirement | Code | Test |
+|---|---|---|---|
+| R33 | Owner/profile/channel/session identity is explicit and rollback `bibi-01` is excluded | migration `000800`, `messageProjection.js` | `conversationContinuitySchema.test.js`, `messageProjection.test.js` |
+| R34 | Only redacted user/assistant content is projected incrementally and replay converges | `messageProjection.js`, projection API/store | `messageProjection.test.js`, `projectionControlPlane.test.js` |
+| R35 | Bound turns use verified `hermes chat --resume SESSION_ID` with no shell | `sessionBinding.js`, `hermesCliExecutor.js` | `resumeSessionExecutor.test.js` |
+| R36 | One active resume per owner/profile/session | migration `000800`, `bibi_claim_work` | `conversationContinuitySchema.test.js`, `resumeControlPlane.test.js` |
+| R37 | Cloud timeline shows provenance and honest sync; new and continue are separate | `workspaceClient.js`, `BibiWorkspace.jsx` | `conversationContinuityCloud.test.js` |
+| R38 | Mac remains outbound-only and production `/hermes/api/*` is unused | connector transport and projection routes | `connectorOutbound.test.js`, `conversationContinuityCloud.test.js` |
+| R39 | Telegram mirroring is disabled and unsupported | schema default and UI wording | `conversationContinuitySchema.test.js`, `conversationContinuityCloud.test.js` |
+
 ## Verification status
 
-Every row above is proven by a local test: `npm run verify` runs 420 tests, all
-420 pass, and it exits 0 (2026-08-24).
+Every row above is proven by a local test: `npm run verify` runs 635 tests, all
+635 pass, and it exits 0 (2026-08-24).
 
 Those tests verify RLS, the chat functions and the lease claim by SQL analysis
 and by fakes that reproduce the database's uniqueness guarantees. As of the same

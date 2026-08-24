@@ -77,7 +77,7 @@ function dataRoomUrl(path, params) {
   return `/bridge/data-room/${path}?${query}`;
 }
 
-async function fetchJson(path, params = {}, options = {}) {
+async function legacyDataRoomRequest(path, params = {}, options = {}) {
   const method = String(options.method ?? "GET").toUpperCase();
   const isRead = method === "GET";
   const ttlMs = options.cacheTtlMs ?? (isRead ? 30000 : 0);
@@ -332,12 +332,12 @@ function TreeNode({
   );
 }
 
-export default function DataRoom({ onStartChat, onStartMeeting }) {
+export default function DataRoom({ adapter = null, onStartChat, onStartMeeting }) {
   const [activeSpace, setActiveSpace] = useState("profiles");
   const [query, setQuery] = useState("");
   const [searchData, setSearchData] = useState({ files: [], roots: [] });
   const [browseData, setBrowseData] = useState({ roots: [], root: null, path: [], relativePath: "", items: [] });
-  const [rootIndex, setRootIndex] = useState(0);
+  const [rootIndex, setRootIndex] = useState(() => adapter?.defaultRootId ?? 0);
   const [folderPath, setFolderPath] = useState("");
   const [childrenMap, setChildrenMap] = useState({});
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
@@ -352,12 +352,18 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
   const [driveStatus, setDriveStatus] = useState(null);
   const [driveRefreshVersion, setDriveRefreshVersion] = useState(0);
   const driveReadyKeyRef = useRef("");
+  const request = useCallback(
+    (path, params = {}, options = {}) => adapter
+      ? adapter.request(path, params, options)
+      : legacyDataRoomRequest(path, params, options),
+    [adapter],
+  );
 
   const isSearching = query.trim().length > 0;
 
   useEffect(() => {
     let ignore = false;
-    const loadStatus = () => fetchJson("drive-status", {}, { cacheTtlMs: 0 })
+    const loadStatus = () => request("drive-status", {}, { cacheTtlMs: 0 })
       .then((payload) => { if (!ignore) setDriveStatus(payload); })
       .catch(() => { if (!ignore) setDriveStatus(null); });
     loadStatus();
@@ -366,7 +372,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
       ignore = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [request]);
 
   const normalizeBrowseItems = useCallback((items, rootId) => sortTreeItems(items.map((item) => ({
     ...item,
@@ -390,7 +396,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
     const key = nodeKey(rootId, relativePath);
     if (!force && (childrenMap[key] || loadingKeys.has(key))) return;
     setLoadingKeys((current) => new Set([...current, key]));
-    fetchJson("browse", { root: rootId, path: relativePath }, { cacheTtlMs: force ? 0 : undefined })
+    request("browse", { root: rootId, path: relativePath }, { cacheTtlMs: force ? 0 : undefined })
       .then((payload) => {
         setChildrenMap((current) => ({
           ...current,
@@ -405,7 +411,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
           return next;
         });
       });
-  }, [childrenMap, loadingKeys, normalizeBrowseItems]);
+  }, [childrenMap, loadingKeys, normalizeBrowseItems, request]);
 
   const driveReadyKey = driveStatus?.phase === "ready" && driveStatus.lastCompletedAt
     ? `${driveStatus.lastCompletedAt}:${driveStatus.files || 0}`
@@ -433,7 +439,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
 
   useEffect(() => {
     let ignore = false;
-    fetchJson("browse", { root: rootIndex, path: folderPath })
+    request("browse", { root: rootIndex, path: folderPath })
       .then((payload) => {
         if (ignore) return;
         setBrowseData(payload);
@@ -456,7 +462,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
     return () => {
       ignore = true;
     };
-  }, [driveRefreshVersion, rootIndex, folderPath, normalizeBrowseItems]);
+  }, [driveRefreshVersion, rootIndex, folderPath, normalizeBrowseItems, request]);
 
   useEffect(() => {
     if (!isSearching) {
@@ -466,7 +472,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      fetchJson("list", { category: "all", q: query })
+      request("list", { category: "all", q: query })
         .then((payload) => {
           if (!ignore) setSearchData(payload);
         })
@@ -481,14 +487,14 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
       ignore = true;
       window.clearTimeout(timer);
     };
-  }, [isSearching, query]);
+  }, [isSearching, query, request]);
 
   useEffect(() => {
     if (!selected?.id || selected.type === "folder" || selected.type === "root") {
       return undefined;
     }
     let ignore = false;
-    fetchJson("item", { id: selected.id })
+    request("item", { id: selected.id })
       .then((payload) => {
         if (ignore) return;
         setDetail(payload);
@@ -500,7 +506,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
     return () => {
       ignore = true;
     };
-  }, [selected]);
+  }, [request, selected]);
 
   const rootNodes = activeSpaceMeta?.root ? [{
     type: "root",
@@ -517,9 +523,13 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
 
   const selectedKey = selected ? nodeKey(selected.rootId ?? rootIndex, selected.relativePath || "") : "";
   const activeDetail = selected?.id === detail?.id ? detail : null;
-  const rawUrl = activeDetail?.id ? dataRoomUrl("download", { id: activeDetail.id, inline: "1" }) : "";
-  const downloadUrl = activeDetail?.id ? dataRoomUrl("download", { id: activeDetail.id }) : "";
-  const editable = activeDetail?.kind === "text" && !activeDetail.truncated;
+  const rawUrl = activeDetail?.id
+    ? (adapter ? adapter.url?.(activeDetail, { inline: true }) || "" : dataRoomUrl("download", { id: activeDetail.id, inline: "1" }))
+    : "";
+  const downloadUrl = activeDetail?.id
+    ? (adapter?.url?.(activeDetail, { inline: false }) || (adapter ? "" : dataRoomUrl("download", { id: activeDetail.id })))
+    : "";
+  const editable = activeDetail?.kind === "text" && !activeDetail.truncated && activeDetail.editable !== false;
 
   const selectFolder = (node) => {
     setRootIndex(node.rootId);
@@ -623,7 +633,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
     if (!activeDetail || saving) return;
     setSaving(true);
     setError("");
-    fetchJson("item", { id: activeDetail.id }, {
+    request("item", { id: activeDetail.id }, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: draft }),
@@ -769,7 +779,7 @@ export default function DataRoom({ onStartChat, onStartMeeting }) {
                   {editable && <button type="button" onClick={toggleEdit} disabled={saving}>{editing ? (saving ? "저장 중" : "완료") : "수정"}</button>}
                   <button type="button" onClick={sendToChat}>Hermes</button>
                   <button type="button" onClick={startReviewMeeting}>회의</button>
-                  <a href={downloadUrl}>다운로드</a>
+                  {downloadUrl && <a href={downloadUrl}>다운로드</a>}
                 </div>
               </header>
               <section className={`data-room-viewer ${editing ? "editing" : ""}`}>

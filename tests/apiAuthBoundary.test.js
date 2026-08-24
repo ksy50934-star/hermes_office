@@ -9,7 +9,8 @@ import {
 } from "../api/_lib/connectorAuth.js";
 import { authenticateUser } from "../api/_lib/userAuth.js";
 import { handleHeartbeat, handlePoll, handleReport } from "../api/_lib/handlers.js";
-import { WORK_STATUS } from "../src/bibi/workLifecycle.js";
+import { WORK_STATUS, WorkLifecycleError, applyWorkEvent } from "../src/bibi/workLifecycle.js";
+import { toExecutionProfileId } from "../src/bibi/roster.js";
 
 const OWNER = "11111111-1111-1111-1111-111111111111";
 const OTHER_OWNER = "22222222-2222-2222-2222-222222222222";
@@ -113,7 +114,7 @@ test("an unverified user JWT is never trusted for its claims", async () => {
 function fakeStore({ workItems = {} } = {}) {
   const calls = { events: [], results: [], evidence: [], saved: [], released: [], heartbeats: [], claims: [] };
   const eventKeys = new Set();
-  return {
+  const store = {
     calls,
     async recordHeartbeat(payload) {
       calls.heartbeats.push(payload);
@@ -127,6 +128,47 @@ function fakeStore({ workItems = {} } = {}) {
       // Mirrors the real query: scoped by owner, so another account's row is
       // simply absent rather than forbidden.
       return item && item.ownerId === ownerId ? { ...item } : null;
+    },
+    async applyReportAtomically(payload) {
+      const work = workItems[payload.workItemId];
+      if (!work || work.ownerId !== payload.ownerId) {
+        const error = new Error("work item not found for owner");
+        error.code = "WORK_ITEM_NOT_FOUND";
+        throw error;
+      }
+      const key = `${payload.workItemId}:${payload.eventId}`;
+      if (eventKeys.has(key)) return { duplicate: true, status: work.status, resultId: work.resultId };
+      let next;
+      try {
+        next = applyWorkEvent(work, {
+          id: payload.eventId,
+          type: payload.type,
+          at: payload.at,
+          error: payload.error,
+          reason: payload.reason,
+          resultId: payload.type === "succeed" ? "result-1" : null,
+        });
+      } catch (error) {
+        if (error instanceof WorkLifecycleError) throw error;
+        throw error;
+      }
+      if (store.failAtomicOnce) {
+        store.failAtomicOnce = false;
+        throw new Error("injected evidence failure");
+      }
+      eventKeys.add(key);
+      calls.events.push(payload);
+      if (payload.type === "succeed") {
+        calls.results.push(payload);
+        if (payload.evidence.length) calls.evidence.push({
+          ...payload,
+          executionProfileId: toExecutionProfileId(work.profileId),
+        });
+      }
+      if (["succeed", "fail", "release", "block"].includes(payload.type)) calls.released.push(payload);
+      calls.saved.push({ ownerId: payload.ownerId, work: next });
+      workItems[payload.workItemId] = next;
+      return { duplicate: false, status: next.status, resultId: next.resultId };
     },
     async recordEvent({ workItemId, eventId, ...rest }) {
       const key = `${workItemId}:${eventId}`;
@@ -149,6 +191,7 @@ function fakeStore({ workItems = {} } = {}) {
       calls.saved.push(payload);
     },
   };
+  return store;
 }
 
 function runningWork(overrides = {}) {
@@ -230,6 +273,36 @@ test("an illegal transition is refused with 409 instead of corrupting the state"
   assert.equal(result.status, 409);
   assert.equal(result.body.error, "INVALID_TRANSITION");
   assert.deepEqual(store.calls.saved, []);
+});
+
+test("an illegal report retry remains 409 and never consumes the event id", async () => {
+  const store = fakeStore({ workItems: { "work-1": runningWork({ status: WORK_STATUS.INTAKE }) } });
+  const body = { id: "illegal-e1", type: "succeed", workItemId: "work-1", summary: "완료" };
+  const first = await handleReport({ auth: AUTH, body, store });
+  const retry = await handleReport({ auth: AUTH, body, store });
+  assert.equal(first.status, 409);
+  assert.equal(retry.status, 409);
+  assert.deepEqual(store.calls.events, [], "invalid transitions must not reserve their event key");
+});
+
+test("a partial report write rolls back completely and a healthy retry can finish", async () => {
+  const store = fakeStore({ workItems: { "work-1": runningWork() } });
+  store.failAtomicOnce = true;
+  const body = {
+    id: "atomic-e1",
+    type: "succeed",
+    workItemId: "work-1",
+    summary: "완료",
+    evidence: [{ kind: "log", label: "l", sha256: "a".repeat(64), byteSize: 1 }],
+  };
+  await assert.rejects(() => handleReport({ auth: AUTH, body, store }), /injected evidence failure/);
+  assert.equal(store.calls.results.length, 0, "result insert must roll back with the report transaction");
+  assert.equal(store.calls.events.length, 0, "event key must remain retryable after rollback");
+  assert.equal(store.calls.released.length, 0);
+  assert.equal(store.calls.saved.length, 0);
+  const retry = await handleReport({ auth: AUTH, body, store });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.duplicate, false);
 });
 
 test("a connector may not report an owner-only event", async () => {

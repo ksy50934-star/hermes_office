@@ -2,11 +2,21 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import BibiWorkspace from "./BibiWorkspace.jsx";
 import BibiDirectChat from "./BibiDirectChat.jsx";
 import BibiCloudMeetingConsole from "./BibiCloudMeetingConsole.jsx";
-import BibiDataRoom from "./BibiDataRoom.jsx";
+
 import { AUTH_GATE, isAuthLocked, isBibiCloudView, isBibiSurface } from "./bibi/surface.js";
 import { cloudOfficeState } from "./bibi/cloudLegacyAdapter.js";
 import { createBibiKanbanAdapter } from "./bibi/kanbanAdapter.js";
-import { startMeeting as startBibiMeeting, transitionWork as transitionBibiWork } from "./cloud/workspaceClient.js";
+import { createCloudArchiveAdapter } from "./bibi/archiveAdapter.js";
+import { createCloudDataRoomAdapter } from "./bibi/dataRoomAdapter.js";
+import { createCloudExecutionConsoleAdapter } from "./bibi/executionConsoleAdapter.js";
+import { createCloudPluginAdapter } from "./bibi/pluginAdapter.js";
+import { createCloudSystemAdapter } from "./bibi/systemAdapter.js";
+import { createCloudTeamAdapter } from "./bibi/teamAdapter.js";
+import {
+  saveOrganizationState as saveCloudOrganization,
+  startMeeting as startBibiMeeting,
+  transitionWork as transitionBibiWork,
+} from "./cloud/workspaceClient.js";
 import CommandCenter from "./CommandCenter.jsx";
 import DataRoom from "./DataRoom.jsx";
 import HermesOffice from "./HermesOffice.jsx";
@@ -378,7 +388,7 @@ function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMee
   );
 }
 
-function SystemPage({ workspace, connection, notificationSettings, onNotificationSettingsChange, onTestNotification }) {
+function SystemPage({ workspace, connection, notificationSettings, onNotificationSettingsChange, onTestNotification, adapter = null }) {
   const profiles = useMemo(() => workspace?.profiles ?? [], [workspace?.profiles]);
   const managedProfiles = profiles;
   const firstProfile = managedProfiles[0];
@@ -407,6 +417,12 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
   const [settingsNotice, setSettingsNotice] = useState(googleOAuthNoticeFromUrl);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [activeSection, setActiveSection] = useState(initialSystemSectionFromUrl);
+  useEffect(() => {
+    if (!adapter?.readOnly || activeSection === "overview" || activeSection === "notifications") return;
+    setActiveSection("overview");
+    syncSystemSectionUrl("overview");
+    setSettingsNotice("Cloud 운영 화면은 outbound connector가 투영한 상태를 표시합니다. 런타임 설정 변경은 durable command channel 연결 후 활성화됩니다.");
+  }, [activeSection, adapter]);
   const [reservationIntegrations, setReservationIntegrations] = useState(null);
   const [reservationIntegrationsLoading, setReservationIntegrationsLoading] = useState(false);
   const [reservationIntegrationsError, setReservationIntegrationsError] = useState("");
@@ -569,16 +585,16 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
   };
 
   useEffect(() => {
-    if (activeSection !== "integration") return undefined;
+    if (adapter || activeSection !== "integration") return undefined;
     const timer = window.setTimeout(() => loadReservationIntegrations(false), 0);
     return () => window.clearTimeout(timer);
-  }, [activeSection, loadReservationIntegrations]);
+  }, [activeSection, adapter, loadReservationIntegrations]);
 
   useEffect(() => {
-    if (activeSection !== "reservations") return undefined;
+    if (adapter || activeSection !== "reservations") return undefined;
     const timer = window.setTimeout(() => loadReservationOperations(), 0);
     return () => window.clearTimeout(timer);
-  }, [activeSection, loadReservationOperations]);
+  }, [activeSection, adapter, loadReservationOperations]);
 
   useEffect(() => {
     if (profileMode === "create" || !profiles.length || profileDraft.name) return;
@@ -606,6 +622,18 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
   }, [modelDraft.contextLength, modelDraft.model, modelDraft.provider, workspace?.model]);
 
   const refreshModels = useCallback(() => {
+    if (adapter) {
+      const projected = profiles.map((profile) => ({
+        id: profile.model,
+        label: profile.model,
+        provider: profile.provider ?? workspace?.model?.provider ?? "",
+        contextLength: "",
+      })).filter((model) => model.id);
+      setAvailableModels(projected);
+      setModelsLoading(false);
+      setModelsError("");
+      return () => {};
+    }
     let ignore = false;
     setModelsLoading(true);
     setModelsError("");
@@ -641,7 +669,7 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [adapter, profiles, workspace?.model?.provider]);
 
   useEffect(() => {
     let cleanup = () => {};
@@ -934,7 +962,7 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
       <PageIntro
         eyebrow="CONTROL CENTER"
         title="Hermes 운영 관리"
-        description="시스템 상태, 구성원, 모델, 연동과 알림을 실제 Hermes 설정과 함께 관리합니다."
+        description={adapter ? "outbound connector가 Supabase에 투영한 18개 Hermes profile의 runtime health를 확인합니다." : "시스템 상태, 구성원, 모델, 연동과 알림을 실제 Hermes 설정과 함께 관리합니다."}
       />
       <div className="system-status-strip">
         <div><i className={connectionCopy.className} /><span>Hermes {connectionCopy.label}</span></div>
@@ -953,6 +981,8 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
             tabIndex={activeSection === id ? 0 : -1}
             key={id}
             className={activeSection === id ? "active" : ""}
+            disabled={Boolean(adapter?.readOnly && !["overview", "notifications"].includes(id))}
+            title={adapter?.readOnly && !["overview", "notifications"].includes(id) ? "Cloud runtime 설정 변경 command channel 연결 후 활성화됩니다." : undefined}
             onClick={() => { setActiveSection(id); syncSystemSectionUrl(id); }}
           >
             {label}
@@ -1403,6 +1433,7 @@ function OfficeApp() {
   const [organizationStatus, setOrganizationStatus] = useState("loading");
   const [organizationError, setOrganizationError] = useState("");
   const organizationSeedStartedRef = useRef(false);
+  const cloudOrganizationSeedStartedRef = useRef(false);
   const [error, setError] = useState("");
   const [selectedRoom, setSelectedRoom] = useState("");
   const [selectedRoomContext, setSelectedRoomContext] = useState(null);
@@ -1431,6 +1462,12 @@ function OfficeApp() {
   const notificationTimerRef = useRef(0);
   const bibiSurface = isBibiSurface(view);
   const bibiCloudView = isBibiCloudView(view);
+  const cloudOrganization = bibiCloudSnapshot?.organization ?? { revision: 0, nodes: [], audit: [] };
+  const effectiveOrganization = bibiCloudView ? cloudOrganization : organization;
+  const effectiveOrganizationStatus = bibiCloudView
+    ? (bibiCloudSnapshot?.ownerId ? "ready" : "loading")
+    : organizationStatus;
+  const effectiveOrganizationError = bibiCloudView ? "" : organizationError;
   const bibiOffice = useMemo(() => cloudOfficeState(bibiCloudSnapshot ?? {}), [bibiCloudSnapshot]);
   const cloudRuntimeMeetings = useMemo(() => (bibiCloudSnapshot?.meetings ?? []).map((meeting) => ({
     id: meeting.id,
@@ -1446,6 +1483,49 @@ function OfficeApp() {
   const bibiKanbanAdapter = useMemo(
     () => bibiCloudSnapshot?.ownerId ? createBibiKanbanAdapter({ ownerId: bibiCloudSnapshot.ownerId }) : null,
     [bibiCloudSnapshot],
+  );
+  const bibiArchiveAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createCloudArchiveAdapter({
+      archive: bibiCloudSnapshot.archive ?? [],
+      meetings: bibiCloudSnapshot.meetings ?? [],
+    }) : null,
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.archive, bibiCloudSnapshot?.meetings],
+  );
+  const bibiDataRoomAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createCloudDataRoomAdapter({
+      artifacts: bibiCloudSnapshot.artifacts ?? [],
+      connector: bibiCloudSnapshot.connector ?? null,
+    }) : null,
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.artifacts, bibiCloudSnapshot?.connector],
+  );
+  const bibiPluginAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createCloudPluginAdapter({ runtime: bibiCloudSnapshot.runtime }) : null,
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.runtime],
+  );
+  const bibiTeamAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createCloudTeamAdapter({
+      runtime: bibiCloudSnapshot.runtime,
+      archive: bibiCloudSnapshot.archive ?? [],
+    }) : null,
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.runtime, bibiCloudSnapshot?.archive],
+  );
+  const bibiExecutionConsoleAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createCloudExecutionConsoleAdapter({
+      ownerId: bibiCloudSnapshot.ownerId,
+      roster: bibiCloudSnapshot.roster ?? [],
+      workItems: bibiCloudSnapshot.workItems ?? [],
+      runtime: bibiCloudSnapshot.runtime,
+      connector: bibiCloudSnapshot.connector,
+    }) : null,
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.roster, bibiCloudSnapshot?.workItems, bibiCloudSnapshot?.runtime, bibiCloudSnapshot?.connector],
+  );
+  const bibiSystemAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createCloudSystemAdapter({
+      roster: bibiCloudSnapshot.roster ?? [],
+      runtime: bibiCloudSnapshot.runtime,
+      connector: bibiCloudSnapshot.connector,
+    }) : null,
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.roster, bibiCloudSnapshot?.runtime, bibiCloudSnapshot?.connector],
   );
   const specialistSurfaceReady = !bibiSurface
     && (!bibiCloudView || (bibiAuthGate === AUTH_GATE.OPEN && Boolean(bibiCloudSnapshot)));
@@ -1570,11 +1650,12 @@ function OfficeApp() {
     [activeWorkspace, effectiveActivities],
   );
   const roomAssignments = useMemo(
-    () => organizationRoomAssignments(organization.nodes),
-    [organization.nodes],
+    () => organizationRoomAssignments(effectiveOrganization.nodes),
+    [effectiveOrganization.nodes],
   );
 
   useEffect(() => {
+    if (bibiCloudView) return undefined;
     let stopped = false;
     loadOrganization()
       .then(async (state) => {
@@ -1603,10 +1684,10 @@ function OfficeApp() {
         setOrganizationError(loadError.message);
       });
     return () => { stopped = true; };
-  }, []);
+  }, [bibiCloudView]);
 
   useEffect(() => {
-    if (organizationStatus !== "ready" || organization.revision !== 0 || organization.nodes.length || !profiles.length || organizationSeedStartedRef.current) return;
+    if (bibiCloudView || organizationStatus !== "ready" || organization.revision !== 0 || organization.nodes.length || !profiles.length || organizationSeedStartedRef.current) return;
     organizationSeedStartedRef.current = true;
     const defaults = buildDefaultOrganizationNodes(profiles);
     saveOrganization(defaults, 0)
@@ -1620,19 +1701,48 @@ function OfficeApp() {
         setOrganizationError(saveError.message);
         if (saveError.status !== 409) organizationSeedStartedRef.current = false;
       });
-  }, [organization.nodes.length, organization.revision, organizationStatus, profiles]);
+  }, [bibiCloudView, organization.nodes.length, organization.revision, organizationStatus, profiles]);
+
+  useEffect(() => {
+    const ownerId = bibiCloudSnapshot?.ownerId;
+    if (!bibiCloudView || !ownerId || cloudOrganization.revision !== 0 || cloudOrganization.nodes.length || !profiles.length || cloudOrganizationSeedStartedRef.current) return;
+    cloudOrganizationSeedStartedRef.current = true;
+    const defaults = buildDefaultOrganizationNodes(profiles);
+    saveCloudOrganization({ ownerId, nodes: defaults, expectedRevision: 0, audit: cloudOrganization.audit })
+      .then((state) => setBibiCloudSnapshot((current) => current ? { ...current, organization: state } : current))
+      .catch((saveError) => {
+        if (saveError.status === 409 && saveError.current) {
+          setBibiCloudSnapshot((current) => current ? { ...current, organization: saveError.current } : current);
+          return;
+        }
+        cloudOrganizationSeedStartedRef.current = false;
+        setOrganizationError(saveError.message);
+      });
+  }, [bibiCloudView, bibiCloudSnapshot?.ownerId, cloudOrganization.audit, cloudOrganization.nodes.length, cloudOrganization.revision, profiles]);
 
   const saveOrganizationStructure = useCallback(async (nodes) => {
     setOrganizationStatus("saving");
     setOrganizationError("");
     try {
+      if (bibiCloudView && bibiCloudSnapshot?.ownerId) {
+        const state = await saveCloudOrganization({
+          ownerId: bibiCloudSnapshot.ownerId,
+          nodes,
+          expectedRevision: cloudOrganization.revision,
+          audit: cloudOrganization.audit,
+        });
+        setBibiCloudSnapshot((current) => current ? { ...current, organization: state } : current);
+        setOrganizationStatus("ready");
+        return state;
+      }
       const state = await saveOrganization(nodes, organization.revision);
       setOrganization(state);
       setOrganizationStatus("ready");
       return state;
     } catch (saveError) {
       if (saveError.status === 409 && saveError.current) {
-        setOrganization(saveError.current);
+        if (bibiCloudView) setBibiCloudSnapshot((current) => current ? { ...current, organization: saveError.current } : current);
+        else setOrganization(saveError.current);
         setOrganizationStatus("ready");
       } else {
         setOrganizationStatus("error");
@@ -1640,7 +1750,7 @@ function OfficeApp() {
       setOrganizationError(saveError.message);
       throw saveError;
     }
-  }, [organization.revision]);
+  }, [bibiCloudSnapshot?.ownerId, bibiCloudView, cloudOrganization.audit, cloudOrganization.revision, organization.revision]);
   const workspaceForViews = useMemo(() => {
     if (!activeWorkspace) return activeWorkspace;
     const managed = new Map(profiles.map((profile) => [profile.name, profile]));
@@ -2298,9 +2408,7 @@ function OfficeApp() {
         )}
 
         {specialistSurfaceReady && view === "data" && (
-          bibiCloudView
-            ? <BibiDataRoom artifacts={bibiCloudSnapshot?.artifacts ?? []} profiles={profiles} onStartChat={startChat} onStartMeeting={startMeeting} />
-            : <DataRoom onStartChat={startChat} onStartMeeting={startMeeting} />
+          <DataRoom adapter={bibiCloudView ? bibiDataRoomAdapter : null} onStartChat={startChat} onStartMeeting={startMeeting} />
         )}
 
         {specialistSurfaceReady && !bibiCloudView && (
@@ -2354,8 +2462,7 @@ function OfficeApp() {
             />
             <SessionArchive
               profiles={profiles}
-              cloudArchive={bibiCloudView ? bibiCloudSnapshot?.archive ?? [] : null}
-              cloudMeetings={bibiCloudView ? bibiCloudSnapshot?.meetings ?? [] : null}
+              archiveAdapter={bibiCloudView ? bibiArchiveAdapter : null}
               onContinue={continueSession}
               onBranch={branchSession}
               onTerminal={openSessionTerminal}
@@ -2374,9 +2481,10 @@ function OfficeApp() {
               profiles={profiles}
               activities={effectiveActivities}
               missions={effectiveMissions}
-              organization={organization}
-              organizationStatus={organizationStatus}
-              organizationError={organizationError}
+              adapter={bibiCloudView ? bibiTeamAdapter : null}
+              organization={effectiveOrganization}
+              organizationStatus={effectiveOrganizationStatus}
+              organizationError={effectiveOrganizationError}
               onSaveOrganization={saveOrganizationStructure}
               onChat={startChat}
               onOpenOffice={() => navigate("office")}
@@ -2384,31 +2492,38 @@ function OfficeApp() {
           </section>
         )}
 
-        {view === "plugins" && (
+        {specialistSurfaceReady && view === "plugins" && (
           <section className="page-card plugins-page">
             <PageIntro
               eyebrow="PLUGIN REGISTRY"
-              title="프로필별 도구 설치와 검증"
-              description="검증된 MCP, plugin, skill을 프로필별로 선택하고 실제 연결 상태를 확인합니다."
+              title={bibiCloudView ? "프로필별 도구 투영 상태" : "프로필별 도구 설치와 검증"}
+              description={bibiCloudView
+                ? "outbound connector가 수집한 MCP, plugin, toolset 상태를 프로필별로 확인합니다."
+                : "검증된 MCP, plugin, skill을 프로필별로 선택하고 실제 연결 상태를 확인합니다."}
             />
-            <PluginHub profiles={profiles} />
+            <PluginHub profiles={profiles} adapter={bibiCloudView ? bibiPluginAdapter : null} />
           </section>
         )}
 
-        {view === "system" && (
+        {specialistSurfaceReady && view === "system" && (
           <SystemPage
-            workspace={workspaceForViews}
-            connection={connection}
+            workspace={bibiCloudView ? bibiSystemAdapter?.workspace : workspaceForViews}
+            connection={bibiCloudView ? bibiSystemAdapter?.connection : connection}
+            adapter={bibiCloudView ? bibiSystemAdapter : null}
             notificationSettings={notificationSettings}
             onNotificationSettingsChange={updateNotificationSettings}
             onTestNotification={testNotification}
           />
         )}
 
-        {view === "terminal" && (
+        {specialistSurfaceReady && view === "terminal" && (
           <section className="hermes-dashboard-page">
             <Suspense fallback={<div className="module-loading"><i /><span>Hermes 터미널을 불러오는 중입니다.</span></div>}>
-              <HermesDashboard resumeSessionId={selectedSession} onStatusChange={setConnection} />
+              <HermesDashboard
+                resumeSessionId={selectedSession}
+                onStatusChange={setConnection}
+                adapter={bibiCloudView ? bibiExecutionConsoleAdapter : null}
+              />
             </Suspense>
           </section>
         )}

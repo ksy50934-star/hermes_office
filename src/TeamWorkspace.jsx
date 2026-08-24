@@ -664,6 +664,7 @@ export default function TeamWorkspace({
   profiles,
   activities,
   missions = [],
+  adapter = null,
   onChat,
   onOpenOffice = () => {},
   organization = { version: 1, revision: 0, nodes: [], audit: [] },
@@ -671,7 +672,7 @@ export default function TeamWorkspace({
   organizationError = "",
   onSaveOrganization = async () => {},
 }) {
-  const [teamCache] = useState(() => loadTeamCache());
+  const [teamCache] = useState(() => adapter ? {} : loadTeamCache());
   const [active, setActive] = useState(profiles[0]?.name ?? "default");
   const [tab, setTab] = useState("hierarchy");
   const [data, setData] = useState(() => teamCache[profiles[0]?.name ?? "default"]?.data ?? { skills: [], toolsets: [], plugins: [], mcp: [], cron: [] });
@@ -687,7 +688,7 @@ export default function TeamWorkspace({
   useEffect(() => {
     if (!activeName) return undefined;
     let ignore = false;
-    const cached = teamCache[activeName];
+    const cached = adapter ? null : teamCache[activeName];
     if (cached && Date.now() - Number(cached.savedAt ?? 0) < 10 * 60 * 1000) {
       window.setTimeout(() => {
         if (ignore) return;
@@ -696,13 +697,17 @@ export default function TeamWorkspace({
         setLoadedName(activeName);
       }, 0);
     }
-    Promise.all([loadProfileCapabilities(activeName), loadProfileSessions(activeName, 6)])
-      .then(([capabilities, recent]) => {
+    const load = adapter
+      ? adapter.load(activeName)
+      : Promise.all([loadProfileCapabilities(activeName), loadProfileSessions(activeName, 6)])
+        .then(([capabilities, recent]) => ({ capabilities, sessions: recent }));
+    load
+      .then(({ capabilities, sessions: recent }) => {
         if (ignore) return;
         setData(capabilities);
         setSessions(recent);
         setLoadedName(activeName);
-        saveTeamCache(activeName, capabilities, recent);
+        if (!adapter) saveTeamCache(activeName, capabilities, recent);
       })
       .catch(() => {
         if (!ignore) setLoadedName(activeName);
@@ -710,7 +715,7 @@ export default function TeamWorkspace({
     return () => {
       ignore = true;
     };
-  }, [activeName, teamCache]);
+  }, [activeName, adapter, teamCache]);
 
   const enabledTools = useMemo(
     () => data.toolsets.filter((tool) => tool.enabled && tool.available),

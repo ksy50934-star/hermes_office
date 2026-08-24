@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { handleChatSend, handlePoll, handleReport } from "../api/_lib/handlers.js";
-import { WORK_STATUS } from "../src/bibi/workLifecycle.js";
+import { applyWorkEvent, WORK_STATUS } from "../src/bibi/workLifecycle.js";
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -133,6 +133,49 @@ function chatStore({ conversations = { "conv-1": { ownerId: OWNER, profileId: "b
       const item = workItems.get(workItemId);
       return item && item.ownerId === ownerId ? { ...item } : null;
     },
+    async applyReportAtomically({
+      ownerId, connectorNodeId, workItemId, eventId, type, attempt,
+      turnIdempotencyKey, summary, error, reason, at,
+    }) {
+      const item = workItems.get(workItemId);
+      if (!item || item.ownerId !== ownerId) {
+        const failure = new Error("work item not found for owner");
+        failure.code = "WORK_ITEM_NOT_FOUND";
+        throw failure;
+      }
+      const eventKey = `${workItemId}:${eventId}`;
+      if (events.has(eventKey)) return { duplicate: true, status: item.status, resultId: item.resultId };
+      if (item.nodeId !== connectorNodeId || item.attempt !== attempt || item.turnIdempotencyKey !== turnIdempotencyKey) {
+        const failure = new Error("report identity mismatch");
+        failure.code = "REPORT_IDENTITY_MISMATCH";
+        throw failure;
+      }
+
+      let resultId = null;
+      if (type === "succeed") {
+        resultId = `result-${workItemId}`;
+        if (item.kind === "chat" && item.continuationStatus !== "bound") {
+          await this.insertAssistantMessage({ ownerId, workItemId, body: summary });
+        }
+      }
+      try {
+        const next = applyWorkEvent(item, {
+          id: eventId,
+          type,
+          resultId,
+          error,
+          reason,
+          at,
+        });
+        events.add(eventKey);
+        workItems.set(workItemId, next);
+        calls.saved.push(next);
+        return { duplicate: false, status: next.status, resultId };
+      } catch (cause) {
+        cause.code = cause.code === "MISSING_REASON" ? "MISSING_REASON" : "INVALID_TRANSITION";
+        throw cause;
+      }
+    },
     async recordEvent({ workItemId, eventId }) {
       const key = `${workItemId}:${eventId}`;
       if (events.has(key)) return { duplicate: true };
@@ -154,7 +197,24 @@ function chatStore({ conversations = { "conv-1": { ownerId: OWNER, profileId: "b
 
 function running(store, workItemId) {
   const item = store.workItems.get(workItemId);
-  store.workItems.set(workItemId, { ...item, status: WORK_STATUS.RUNNING, attempt: 1 });
+  store.workItems.set(workItemId, {
+    ...item,
+    status: WORK_STATUS.RUNNING,
+    attempt: 1,
+    nodeId: NODE,
+    turnIdempotencyKey: `${workItemId}:1`,
+  });
+}
+
+function connectorReport(workItemId, type, overrides = {}) {
+  return {
+    id: `${workItemId}:1:${type}`,
+    type,
+    workItemId,
+    attempt: 1,
+    turnIdempotencyKey: `${workItemId}:1`,
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +345,7 @@ test("a successful chat command writes the assistant reply into the same convers
 
   const report = await handleReport({
     auth: AUTH,
-    body: { id: `${workItemId}:1:succeed`, type: "succeed", workItemId, summary: "오늘 일정은 두 건입니다." },
+    body: connectorReport(workItemId, "succeed", { summary: "오늘 일정은 두 건입니다." }),
     store,
   });
 
@@ -300,7 +360,7 @@ test("a successful chat command writes the assistant reply into the same convers
 test("a redelivered success report does not post the reply twice", async () => {
   const store = chatStore();
   const workItemId = await sendAndRun(store);
-  const body = { id: `${workItemId}:1:succeed`, type: "succeed", workItemId, summary: "답변" };
+  const body = connectorReport(workItemId, "succeed", { summary: "답변" });
 
   const first = await handleReport({ auth: AUTH, body, store });
   const second = await handleReport({ auth: AUTH, body, store });
@@ -310,20 +370,41 @@ test("a redelivered success report does not post the reply twice", async () => {
   assert.equal(store.messages.filter((message) => message.role === "assistant").length, 1);
 });
 
+test("a bound resumed turn relies on the projected Hermes reply instead of duplicating it", async () => {
+  const store = chatStore();
+  const workItemId = await sendAndRun(store);
+  store.workItems.set(workItemId, {
+    ...store.workItems.get(workItemId),
+    continuationStatus: "bound",
+    bindingId: "binding-1",
+    hermesSessionId: "session-1",
+  });
+
+  const report = await handleReport({
+    auth: AUTH,
+    body: connectorReport(workItemId, "succeed", { id: "bound-success", summary: "projection에서 올 답변" }),
+    store,
+  });
+
+  assert.equal(report.status, 200);
+  assert.deepEqual(store.calls.assistant, []);
+  assert.equal(store.messages.filter((message) => message.role === "assistant").length, 0);
+});
+
 test("an assistant reply is written at most once even if the event id differs", async () => {
   const store = chatStore();
   const workItemId = await sendAndRun(store);
 
   await handleReport({
     auth: AUTH,
-    body: { id: "evt-a", type: "succeed", workItemId, summary: "답변" },
+    body: connectorReport(workItemId, "succeed", { id: "evt-a", summary: "답변" }),
     store,
   });
   // A second success under a different event id is refused by the lifecycle
   // (the item is already terminal), so no second reply can appear.
   const second = await handleReport({
     auth: AUTH,
-    body: { id: "evt-b", type: "succeed", workItemId, summary: "다른 답변" },
+    body: connectorReport(workItemId, "succeed", { id: "evt-b", summary: "다른 답변" }),
     store,
   });
 
@@ -350,12 +431,13 @@ test("an ordinary work item never writes into a conversation", async () => {
     resultId: null,
     error: null,
     blockedReason: null,
+    turnIdempotencyKey: "work-plain:1",
     appliedEventIds: [],
   });
 
   await handleReport({
     auth: AUTH,
-    body: { id: "e1", type: "succeed", workItemId: "work-plain", summary: "완료" },
+    body: connectorReport("work-plain", "succeed", { id: "e1", summary: "완료" }),
     store,
   });
 
@@ -369,7 +451,7 @@ test("a failed chat turn reports its failure without inventing a reply", async (
 
   const report = await handleReport({
     auth: AUTH,
-    body: { id: "e1", type: "fail", workItemId, error: "로컬 실행 시간 초과" },
+    body: connectorReport(workItemId, "fail", { id: "e1", error: "로컬 실행 시간 초과" }),
     store,
   });
 

@@ -20,6 +20,7 @@ export const BIBI_SURFACE_IDS = Object.freeze(new Set([BIBI_VIEW_ID]));
 /** Views protected by the Bibi owner session and backed by Bibi cloud data. */
 export const BIBI_CLOUD_VIEW_IDS = Object.freeze(new Set([
   "ceo", "office", "chat", "meeting", "kanban", "command", "data", "sessions", "team",
+  "plugins", "system", "terminal",
 ]));
 
 export function isBibiSurface(view) {

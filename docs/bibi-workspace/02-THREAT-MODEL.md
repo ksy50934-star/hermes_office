@@ -80,8 +80,20 @@ fails the build if any connector module references `createServer`, `.listen(`,
 ### T6 — Local state exfiltration
 *Mitigations.* Evidence is a hash plus a redacted excerpt, never a file copy.
 `assertNoLocalStateSource` refuses profile state files, cookie jars, credential
-files, `.ssh`, `.env` and key files. The CLI executor's only filesystem access
-is a `stat` on a home directory; it never opens anything inside a profile.
+files, `.ssh`, `.env` and key files. The CLI executor itself still only stats a
+home directory. The separate projection reader opens `state.db` read-only for a
+cloud-verified Telegram binding and selects an explicit column allowlist. It
+discards system/tool/compacted/inactive rows and any row carrying tool payloads,
+never selects reasoning/API/display metadata, and redacts credentials and local
+paths before upload. Checkpoints identify message integers, never file paths.
+
+### T6a — Cross-owner or cross-profile session binding
+*Mitigations.* Every binding carries owner, organisational profile, execution
+profile, channel and Hermes session together. Database triggers compare the
+binding and projection with the owner-scoped canonical conversation; APIs repeat
+the identity comparison even under the service role; the connector validates
+the 18-role mapping and the local session's source/profile before resume. Any
+missing or unverifiable fact returns an explicit `BLOCKED_*` result.
 
 ### T7 — Command injection through a prompt
 A chat turn is user-controlled text that becomes a CLI argument.

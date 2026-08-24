@@ -59,7 +59,12 @@ export function createLeaseRunner({
     // will actually run it is derived here, once, and travels alongside the
     // role slot through execution and into every report.
     const executionProfileId = toExecutionProfileId(command.profileId);
-    const identity = { profileId: command.profileId, executionProfileId };
+    const identity = {
+      profileId: command.profileId,
+      executionProfileId,
+      attempt: command.attempt,
+      turnIdempotencyKey: command.turnIdempotencyKey,
+    };
 
     if (!isBibiProfileId(command.profileId) || !executionProfileId) {
       await report({

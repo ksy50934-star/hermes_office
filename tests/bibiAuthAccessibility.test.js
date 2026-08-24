@@ -168,16 +168,15 @@ test("the auth gate has an explicit vocabulary and defaults to locked", () => {
   assert.equal(isAuthLocked("ceo", AUTH_GATE.OPEN), false);
 });
 
-test("the lock applies to every owner-data Bibi surface and not legacy system tools", () => {
-  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team"]) {
+test("the lock applies to every owner-data Bibi surface, including cloud-backed system tools", () => {
+  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team", "plugins", "system", "terminal"]) {
     assert.equal(isBibiCloudView(view), true);
     assert.equal(isAuthLocked(view, AUTH_GATE.LOCKED), true, `${view} must be locked`);
   }
   assert.equal(isBibiSurface("ceo"), true, "only the CEO uses the BibiWorkspace renderer");
   assert.equal(isBibiSurface("office"), false, "office keeps the canonical visual renderer");
-  for (const legacy of ["plugins", "system", "terminal"]) {
-    assert.equal(isBibiCloudView(legacy), false);
-    assert.equal(isAuthLocked(legacy, AUTH_GATE.LOCKED), false);
+  for (const specialist of ["plugins", "system", "terminal"]) {
+    assert.equal(isBibiSurface(specialist), false, `${specialist} keeps its specialist renderer`);
   }
 });
 

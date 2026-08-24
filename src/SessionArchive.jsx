@@ -87,6 +87,7 @@ function groupLegacyMeetings(sessions, localMeetings) {
 
 export default function SessionArchive({
   profiles,
+  archiveAdapter = null,
   onContinue,
   onBranch,
   onTerminal,
@@ -107,7 +108,27 @@ export default function SessionArchive({
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
 
   useEffect(() => {
-    if (!profileNames.length) return;
+    if (!archiveAdapter) return undefined;
+    let active = true;
+    setLoading(true);
+    setError("");
+    archiveAdapter.list()
+      .then(({ sessions: nextSessions, meetings: nextMeetings }) => {
+        if (!active) return;
+        setSessions(nextSessions);
+        setMeetings(nextMeetings);
+        setSelected((current) => {
+          const pool = type === "meeting" ? nextMeetings : nextSessions;
+          return pool.find((item) => item.id === current?.id) ?? pool[0] ?? null;
+        });
+      })
+      .catch((loadError) => { if (active) setError(loadError.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [archiveAdapter, type]);
+
+  useEffect(() => {
+    if (archiveAdapter || !profileNames.length) return undefined;
     loadArchivedSessions()
       .then((archivedSessions) => Promise.all(profileNames.map((profile) =>
         loadProfileSessions(profile, 60, { includeArchived: true, archivedSessions }),
@@ -125,10 +146,10 @@ export default function SessionArchive({
       })
       .catch((loadError) => setError(loadError.message))
       .finally(() => setLoading(false));
-  }, [profileNames]);
+  }, [archiveAdapter, profileNames]);
 
   useEffect(() => {
-    if (type !== "meeting" || !selected?.legacySessions?.length || selected.entries.length) return;
+    if (archiveAdapter || type !== "meeting" || !selected?.legacySessions?.length || selected.entries.length) return undefined;
     Promise.all(selected.legacySessions.map(async (session) => {
       const sessionMessages = await loadSessionMessages(session.id, session.profile);
       return sessionMessages
@@ -147,20 +168,23 @@ export default function SessionArchive({
       setMeetings((current) => current.map((meeting) => meeting.id === selected.id ? { ...meeting, entries } : meeting));
       setSelected((current) => current?.id === selected.id ? { ...current, entries } : current);
     }).catch((loadError) => setError(loadError.message));
-  }, [selected, type]);
+  }, [archiveAdapter, selected, type]);
 
   useEffect(() => {
     if (type !== "direct" || !selected) return;
-    loadSessionMessages(selected.id, selected.profile)
-      .then((items) => {
-        setMessageLimit(80);
-        setMessages(sanitizeArchiveMessages(items.map((message) => ({
+    const request = archiveAdapter
+      ? archiveAdapter.loadMessages(selected)
+      : loadSessionMessages(selected.id, selected.profile).then((items) => items.map((message) => ({
           ...message,
           content: decodeHermesText(message.content ?? ""),
-        }))));
+        })));
+    request
+      .then((items) => {
+        setMessageLimit(80);
+        setMessages(sanitizeArchiveMessages(items));
       })
       .catch((loadError) => setError(loadError.message));
-  }, [selected, type]);
+  }, [archiveAdapter, selected, type]);
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => filter === "all" || session.profile === filter),
@@ -180,18 +204,20 @@ export default function SessionArchive({
   const exportSelectedSession = async () => {
     if (!selected?.id || type !== "direct") return;
     try {
-      const payload = await hermesFetch(`/api/sessions/${encodeURIComponent(selected.id)}/export?profile=${encodeURIComponent(selected.profile ?? "")}`, {
-        cacheTtlMs: 0,
-        timeoutMs: 30000,
-      });
+      const payload = archiveAdapter
+        ? await archiveAdapter.export(selected)
+        : await hermesFetch(`/api/sessions/${encodeURIComponent(selected.id)}/export?profile=${encodeURIComponent(selected.profile ?? "")}`, {
+            cacheTtlMs: 0,
+            timeoutMs: 30000,
+          });
       const blob = new Blob([typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `hermes-session-${selected.profile ?? "default"}-${selected.id}.json`;
+      anchor.download = `${archiveAdapter ? "bibi-cloud-conversation" : "hermes-session"}-${selected.profile ?? "default"}-${selected.id}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setNotice("공식 Hermes session export를 생성했습니다.");
+      setNotice(archiveAdapter ? "Bibi Cloud 대화 export를 생성했습니다." : "공식 Hermes session export를 생성했습니다.");
     } catch (exportError) {
       setError(exportError.message);
     }
@@ -199,19 +225,23 @@ export default function SessionArchive({
 
   const deleteSelectedSession = async () => {
     if (!selected?.id || type !== "direct") return;
-    if (!window.confirm("이 대화 세션을 공식 Hermes session store에서 삭제할까요? 되돌릴 수 없습니다.")) return;
+    const targetLabel = archiveAdapter ? "Bibi Cloud 대화와 연결된 메시지" : "공식 Hermes session store의 대화 세션";
+    if (!window.confirm(`${targetLabel}를 삭제할까요? 되돌릴 수 없습니다.`)) return;
     try {
-      await hermesFetch(`/api/sessions/${encodeURIComponent(selected.id)}?profile=${encodeURIComponent(selected.profile ?? "")}`, {
-        method: "DELETE",
-        body: JSON.stringify({}),
-        timeoutMs: 30000,
-      });
+      if (archiveAdapter) await archiveAdapter.remove(selected);
+      else {
+        await hermesFetch(`/api/sessions/${encodeURIComponent(selected.id)}?profile=${encodeURIComponent(selected.profile ?? "")}`, {
+          method: "DELETE",
+          body: JSON.stringify({}),
+          timeoutMs: 30000,
+        });
+      }
       const nextSessions = sessions.filter((session) => !(session.id === selected.id && session.profile === selected.profile));
       setSessions(nextSessions);
       setSelected(nextSessions[0] ?? null);
       setMessages([]);
-      saveArchiveSnapshot(nextSessions, meetings);
-      setNotice("공식 Hermes session store에서 삭제했습니다.");
+      if (!archiveAdapter) saveArchiveSnapshot(nextSessions, meetings);
+      setNotice(archiveAdapter ? "Bibi Cloud 대화를 삭제하고 목록에서 확인했습니다." : "공식 Hermes session store에서 삭제했습니다.");
     } catch (deleteError) {
       setError(deleteError.message);
     }
@@ -272,7 +302,7 @@ export default function SessionArchive({
                 <div>
                   <button type="button" onClick={() => onBranch(selected)}>새 대화로 분기</button>
                   <button type="button" className="primary" onClick={() => onContinue(selected)}>이어가기</button>
-                  <button type="button" onClick={() => onTerminal(selected.id)}>터미널</button>
+                  <button type="button" onClick={() => onTerminal(selected.id)}>{archiveAdapter ? "실행 기록" : "터미널"}</button>
                   <button type="button" onClick={exportSelectedSession}>export</button>
                   <button type="button" onClick={deleteSelectedSession}>삭제</button>
                 </div>

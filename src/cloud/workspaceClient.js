@@ -13,7 +13,7 @@
 
 import { getSupabaseClient } from "./supabaseBrowser.js";
 import { AUTH_CALLBACK } from "../bibi/authCallback.js";
-import { BIBI_PROFILE_IDS } from "../bibi/roster.js";
+import { BIBI_PROFILE_IDS, toExecutionProfileId } from "../bibi/roster.js";
 import { describeConnectorHealth } from "../bibi/connectionState.js";
 
 function client() {
@@ -117,6 +117,30 @@ export async function loadRoster() {
   );
 }
 
+export async function loadOrganizationState(ownerId) {
+  const result = await client()
+    .from("bibi_organization_states")
+    .select("owner_id, revision, nodes, audit, created_at, updated_at")
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+  if (result.error) throw new Error(`loadOrganizationState: ${result.error.message}`);
+  return result.data ?? { owner_id: ownerId, revision: 0, nodes: [], audit: [] };
+}
+
+export async function saveOrganizationState({ ownerId, nodes, expectedRevision }) {
+  const result = await client().rpc("save_bibi_organization_state", {
+    p_expected_revision: expectedRevision,
+    p_nodes: nodes,
+  });
+  const rows = unwrap(result, "saveOrganizationState");
+  if (rows.length === 1) return rows[0];
+  const current = await loadOrganizationState(ownerId);
+  const conflict = new Error("조직 구조가 다른 화면에서 먼저 변경되었습니다. 최신 구조를 다시 불러왔습니다.");
+  conflict.status = 409;
+  conflict.current = current;
+  throw conflict;
+}
+
 /**
  * The connector's own view of itself, plus the derived health the UI shows.
  * With no connector row at all the health is UNKNOWN, never online.
@@ -139,6 +163,21 @@ export async function loadConnectorState() {
   };
 }
 
+export async function loadRuntimeProjection() {
+  const [inventoryResult, healthResult] = await Promise.all([
+    client().from("bibi_plugin_inventory")
+      .select("profile_id, catalog, servers, toolsets, collection_errors, collected_at, updated_at")
+      .order("profile_id"),
+    client().from("bibi_runtime_health")
+      .select("profile_id, hermes_version, model, provider, gateway_status, active_sessions, enabled_toolsets, disabled_toolsets, health_error, collected_at, updated_at")
+      .order("profile_id"),
+  ]);
+  return {
+    inventory: unwrap(inventoryResult, "loadRuntimeProjection.inventory"),
+    health: unwrap(healthResult, "loadRuntimeProjection.health"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
@@ -147,7 +186,7 @@ export async function loadConversations(profileId) {
   return unwrap(
     await client()
       .from("conversations")
-      .select("id, profile_id, title, last_message_at, created_at")
+      .select("id, profile_id, execution_profile_id, title, origin_channel, sync_status, sync_error, telegram_mirroring_enabled, last_message_at, created_at")
       .eq("profile_id", profileId)
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .limit(50),
@@ -155,26 +194,94 @@ export async function loadConversations(profileId) {
   );
 }
 
+export function mergeConversationMessages(webMessages, projectedMessages) {
+  const web = (webMessages ?? []).map((message) => ({
+    ...message,
+    channel: "web",
+    provenance: "web",
+    sync_status: "synced",
+    timeline_at: message.created_at,
+    source_sequence: null,
+    canonical_message_key: message.role === "assistant" && String(message.client_message_id ?? "").startsWith("assistant:")
+      ? message.client_message_id
+      : `web:${message.id}`,
+  }));
+  const projected = (projectedMessages ?? []).map((message) => ({
+    ...message,
+    binding_channel: message.channel,
+    channel: message.origin_channel ?? message.channel,
+    provenance: message.origin_channel ?? message.channel,
+    timeline_at: message.source_timestamp,
+  }));
+  const canonical = new Map();
+  for (const message of [...web, ...projected]) {
+    const key = message.canonical_message_key ?? `${message.channel}:${message.id}`;
+    const existing = canonical.get(key);
+    if (message.lifecycle_state && message.lifecycle_state !== "active") {
+      canonical.set(key, message);
+    } else if (!existing || (existing.binding_channel && !message.binding_channel)) {
+      canonical.set(key, message);
+    }
+  }
+  return [...canonical.values()].filter((message) => !message.lifecycle_state || message.lifecycle_state === "active").sort((left, right) => {
+    const time = Date.parse(left.timeline_at ?? "") - Date.parse(right.timeline_at ?? "");
+    if (time) return time;
+    return Number(left.source_sequence ?? Number.MAX_SAFE_INTEGER) - Number(right.source_sequence ?? Number.MAX_SAFE_INTEGER);
+  });
+}
+
 export async function loadMessages(conversationId) {
-  return unwrap(
-    await client()
+  const supabase = client();
+  const [web, projected] = await Promise.all([
+    supabase
       .from("messages")
       .select("id, role, body, created_at, client_message_id, profile_id")
       .eq("conversation_id", conversationId)
       .order("created_at")
       .limit(500),
-    "loadMessages",
+    supabase
+      .from("projected_messages")
+      .select("id, role, body, channel, origin_channel, canonical_message_key, canonical_turn_id, lifecycle_state, source_message_id, source_sequence, source_timestamp, sync_status, organization_profile_id, execution_profile_id, hermes_session_id")
+      .eq("conversation_id", conversationId)
+      .order("source_sequence")
+      .limit(1000),
+  ]);
+  return mergeConversationMessages(
+    unwrap(web, "loadMessages.web"),
+    unwrap(projected, "loadMessages.projected"),
   );
 }
 
 export async function startConversation({ ownerId, profileId, title = "" }) {
+  const executionProfileId = toExecutionProfileId(profileId);
+  if (!executionProfileId) throw new Error(`'${profileId}'은(는) 실제 bibi 프로필이 아닙니다.`);
   const rows = unwrap(
     await client()
       .from("conversations")
-      .insert({ owner_id: ownerId, profile_id: profileId, title })
-      .select("id, profile_id, title, created_at"),
+      .insert({
+        owner_id: ownerId,
+        profile_id: profileId,
+        execution_profile_id: executionProfileId,
+        origin_channel: "web",
+        sync_status: "local-only",
+        title,
+      })
+      .select("id, profile_id, execution_profile_id, title, origin_channel, sync_status, sync_error, telegram_mirroring_enabled, created_at"),
     "startConversation",
   );
+  return rows[0];
+}
+
+export async function deleteConversation(conversationId) {
+  const rows = unwrap(
+    await client()
+      .from("conversations")
+      .delete()
+      .eq("id", conversationId)
+      .select("id"),
+    "deleteConversation",
+  );
+  if (rows.length !== 1) throw new Error("삭제할 대화를 현재 계정에서 찾지 못했습니다.");
   return rows[0];
 }
 
@@ -430,7 +537,7 @@ export async function loadDataRoomArtifacts() {
  * was missed while the tab was asleep, so the caller must refetch rather than
  * assume its cache is still current.
  */
-export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onResync } = {}) {
+export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onOrganization, onPluginInventory, onRuntimeHealth, onResync } = {}) {
   if (!supabase) return () => {};
 
   let disposed = false;
@@ -457,6 +564,9 @@ export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent,
     bind("bibi_meeting_participants", onMeetingParticipant);
     bind("work_results", onResult);
     bind("work_evidence", onEvidence);
+    bind("bibi_organization_states", onOrganization);
+    bind("bibi_plugin_inventory", onPluginInventory);
+    bind("bibi_runtime_health", onRuntimeHealth);
   };
 
   (async () => {

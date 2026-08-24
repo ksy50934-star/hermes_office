@@ -52,7 +52,7 @@ Nothing here is second-hand.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Application code, schema, tests | **DONE** | `npm run verify` — 420 of 420 tests pass, exit 0 |
+| Application code, schema, tests | **DONE locally** | `npm run verify` — 635 of 635 tests pass, exit 0; continuity still awaits remote/E2E rollout |
 | Package verification | **DONE** | `npm run verify:package` — exit 0, whole tracked-and-untracked tree scanned |
 | Production deployment | **DONE** — target Ready | <https://bibi-workspace-18.vercel.app> |
 | Supabase project | **DONE** — created, linked and reachable | the linked project ref lives only in `supabase/.temp/`, which is never committed |
@@ -65,6 +65,16 @@ Nothing here is second-hand.
 | Temporary E2E Auth user | **deleted** | owner-scoped rows cascaded to 0 |
 | Permanent owner Auth account | **not provisioned — deliberate** | waiting on the real login email |
 | Permanent connector credential and node | **not provisioned — deliberate** | waiting on the real login email |
+
+### Cross-channel continuity pilot
+
+The `bibi-07` Telegram ↔ web continuity path is implemented and covered by
+local RED→GREEN tests, but it is **not deployed**. Forward migration
+`20260824000800_conversation_continuity.sql`, connector projection/resume code,
+control-plane routes and cloud UX are present in this worktree. The migration
+has not been applied to Supabase, Vercel has not been deployed, and the local
+connector/Gateway has not been restarted. Production status is therefore
+`UNKNOWN/UNVERIFIED`, not DONE. Telegram mirroring is disabled and unsupported.
 
 The product path is proven end to end: sign-in, chat dispatch, lease, execution
 on a real Hermes profile and reply write-back all ran against the deployed
@@ -89,6 +99,10 @@ or issue permanent tokens, by instruction.
    token — the plaintext is shown once and never stored. Then run the connector
    on the Mac (`connector/README.md`), first in dry-run, then with
    `BIBI_CONNECTOR_ALLOW_LOCAL_EXECUTION=true`.
+3. **After independent review, apply and exercise continuity.** Apply migration
+   `…000800`, deploy the reviewed cloud build, restart the reviewed connector,
+   bind one verified `bibi-07` Telegram session, and perform the seven readback
+   checks in `01-ARCHITECTURE.md` §11.11. Mirroring stays off.
 
 The E2E run already confirmed the `bibi-01 → default` mapping story against this
 Mac for a specialist slot; the permanent connector's first heartbeat re-confirms
@@ -102,5 +116,6 @@ npm run verify          # lint, build, full test suite, package check
 node --test tests/connectorCliExecutor.test.js   # CLI contract, fixture-driven
 ```
 
-The test suite never invokes the real `hermes` binary and never touches a live
-Hermes profile.
+The test suite never invokes the real `hermes` binary and never reads a live
+Hermes profile; state/session reads are exercised through injected rows and
+fixture executors.

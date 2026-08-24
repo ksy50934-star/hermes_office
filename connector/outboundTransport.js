@@ -76,6 +76,15 @@ export function createOutboundTransport(config, { fetchImpl = globalThis.fetch }
     report(event) {
       return request("/api/connector/report", { body: event });
     },
+    listProjectionTargets() {
+      return request("/api/connector/projection/targets", { body: {} });
+    },
+    uploadProjection(payload) {
+      return request("/api/connector/projection/upload", { body: payload });
+    },
+    uploadRuntimeProjection(payload) {
+      return request("/api/connector/runtime/projection", { body: payload });
+    },
   };
 }
 

@@ -296,6 +296,31 @@
   background: rgba(226, 166, 63, 0.16);
 }
 
+.bibi-conversation-list {
+  border: 1px solid rgba(20, 34, 54, 0.12);
+  border-radius: 10px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.bibi-conversation-actions,
+.bibi-conversation-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bibi-conversation-actions h3 { margin: 0; font-size: 0.82rem; }
+.bibi-conversation-list ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; max-height: 126px; overflow-y: auto; }
+.bibi-conversation-list li { padding: 7px; border-radius: 8px; }
+.bibi-conversation-list li.is-active { background: rgba(67, 104, 145, 0.1); }
+.bibi-conversation-list li div { min-width: 0; display: grid; gap: 2px; }
+.bibi-conversation-list li strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
+.bibi-conversation-list li span { font-size: 0.68rem; opacity: 0.7; }
+.bibi-current-conversation { white-space: nowrap; }
+.bibi-chat-sync { margin: 0; font-size: 0.72rem; opacity: 0.72; }
+
 .bibi-messages {
   list-style: none;
   margin: 0;
@@ -314,9 +339,12 @@
 
 .bibi-composer {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-end;
 }
+
+.bibi-composer small { flex-basis: 100%; opacity: 0.65; font-size: 0.68rem; }
 
 .bibi-composer textarea {
   flex: 1;

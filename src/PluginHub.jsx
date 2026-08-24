@@ -82,7 +82,16 @@ function envTemplate(requiredEnv) {
   }).filter(([key]) => key));
 }
 
-async function loadOfficialTools(profile) {
+async function loadOfficialTools(profile, adapter = null) {
+  if (adapter) {
+    const projected = await adapter.load(profile);
+    return {
+      ...projected,
+      catalog: projected.catalog.map(normalizeCatalogItem).filter((item) => item.name),
+      servers: projected.servers.map(normalizeServer).filter((item) => item.name),
+      toolsets: projected.toolsets.map(normalizeToolset).filter((item) => item.name),
+    };
+  }
   const [catalogPayload, serverPayload, toolPayload, computerUse] = await Promise.all([
     loadHermesMcpCatalog(profile),
     loadHermesMcpServers(profile),
@@ -247,7 +256,7 @@ function InstagramIntegrationCard({ filter }) {
   );
 }
 
-export default function PluginHub({ profiles = [] }) {
+export default function PluginHub({ profiles = [], adapter = null }) {
   const profileNames = useMemo(() => {
     const names = profiles.map((profile) => profile.name).filter((name) => TEAM_META[name]);
     return names.length ? names : Object.keys(TEAM_META).filter((name) => name !== "default");
@@ -263,21 +272,21 @@ export default function PluginHub({ profiles = [] }) {
   const [envDrafts, setEnvDrafts] = useState({});
 
   const reload = useCallback(async (profile) => {
-    const result = await loadOfficialTools(profile);
+    const result = await loadOfficialTools(profile, adapter);
     setCatalog(result.catalog);
     setServers(result.servers);
     setToolsets(result.toolsets);
-  }, []);
+  }, [adapter]);
 
   useEffect(() => {
     let cancelled = false;
-    loadOfficialTools(selectedProfile)
+    loadOfficialTools(selectedProfile, adapter)
       .then((result) => {
         if (cancelled) return;
         setCatalog(result.catalog);
         setServers(result.servers);
         setToolsets(result.toolsets);
-        setNotice("");
+        setNotice(adapter?.readOnly ? "outbound connector가 투영한 읽기 전용 inventory입니다. 변경 command channel을 연결 중입니다." : "");
       })
       .catch((error) => {
         if (!cancelled) setNotice(error.message);
@@ -285,7 +294,7 @@ export default function PluginHub({ profiles = [] }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedProfile]);
+  }, [adapter, selectedProfile]);
 
   const installedNames = useMemo(() => new Set(servers.map((server) => server.name)), [servers]);
   const visibleCatalog = catalog.filter((item) => {
@@ -376,7 +385,9 @@ export default function PluginHub({ profiles = [] }) {
           <div>
             <span>OFFICIAL HERMES CONTROL</span>
             <strong>{TEAM_META[selectedProfile]?.name ?? selectedProfile}</strong>
-            <p>Hermes Dashboard API와 직접 연결된 MCP catalog, 설치 서버, toolset 상태입니다.</p>
+            <p>{adapter?.readOnly
+              ? "outbound connector가 투영한 MCP catalog, server, toolset 상태입니다."
+              : "Hermes Dashboard API와 직접 연결된 MCP catalog, 설치 서버, toolset 상태입니다."}</p>
           </div>
           <nav aria-label="Plugin category">
             {FILTERS.map((item) => (
@@ -388,7 +399,7 @@ export default function PluginHub({ profiles = [] }) {
         </header>
 
         <div className="plugin-grid official-toolset-grid">
-          <InstagramIntegrationCard filter={filter} />
+          {!adapter && <InstagramIntegrationCard filter={filter} />}
 
           {visibleToolsets.map((toolset) => (
             <article className={`plugin-card ${toolset.enabled ? "installed" : ""}`} key={toolset.name}>
@@ -406,11 +417,11 @@ export default function PluginHub({ profiles = [] }) {
                 {toolset.runtime && <span>{toolset.runtime.platform || "unknown OS"} · {toolset.runtime.platform_supported === false ? "unsupported" : toolset.runtime.installed ? "driver installed" : "driver missing"}</span>}
               </div>
               <code>{toolset.tools?.length ? toolset.tools.join(", ") : toolset.name}</code>
-              <footer>
+              {!adapter?.readOnly && <footer>
                 <button type="button" onClick={() => toggleTool(toolset)} disabled={busyKey === `tool:${toolset.name}`}>
                   {toolset.enabled ? "끄기" : "켜기"}
                 </button>
-              </footer>
+              </footer>}
             </article>
           ))}
 
@@ -427,11 +438,11 @@ export default function PluginHub({ profiles = [] }) {
                 <span>{server.tools?.length ?? 0} tools</span>
               </div>
               <code>{server.tools?.length ? server.tools.slice(0, 8).join(", ") : server.name}</code>
-              <footer>
+              {!adapter?.readOnly && <footer>
                 <button type="button" onClick={() => testServer(server)} disabled={busyKey === `test:${server.name}`}>
                   연결 테스트
                 </button>
-              </footer>
+              </footer>}
             </article>
           ))}
 
@@ -452,7 +463,7 @@ export default function PluginHub({ profiles = [] }) {
                   <span>{item.provider}</span>
                   <span>{item.category}</span>
                 </div>
-                {Object.keys(env).length > 0 ? (
+                {Object.keys(env).length > 0 && !adapter?.readOnly ? (
                   <div className="plugin-env-list">
                     {Object.entries(env).map(([key, value]) => (
                       <label key={key}>
@@ -485,9 +496,9 @@ export default function PluginHub({ profiles = [] }) {
                 </details>
                 <footer>
                   {item.homepage && <a href={item.homepage} target="_blank" rel="noreferrer">출처</a>}
-                  <button type="button" onClick={() => installCatalogItem(item)} disabled={busyKey === `install:${item.name}`}>
+                  {!adapter?.readOnly && <button type="button" onClick={() => installCatalogItem(item)} disabled={busyKey === `install:${item.name}`}>
                     {installed ? "재설치" : "설치"}
-                  </button>
+                  </button>}
                 </footer>
               </article>
             );

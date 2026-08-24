@@ -63,7 +63,9 @@ import {
   loadDataRoomArtifacts,
   loadMeetings,
   loadMessages,
+  loadOrganizationState,
   loadRoster,
+  loadRuntimeProjection,
   loadWorkDetail,
   loadWorkItems,
   onAuthStateChange,
@@ -180,7 +182,7 @@ function RosterRail({ roster, activeProfileId, availabilityFor, onSelect }) {
   );
 }
 
-function ChatPanel({ profile, availability, messages, dispatch, onSend, busy, error }) {
+function ChatPanel({ profile, availability, conversation, conversations, messages, dispatch, onSend, onSelectConversation, onNewConversation, busy, error }) {
   const [draft, setDraft] = useState("");
   const messagesRef = useRef(null);
 
@@ -218,10 +220,41 @@ function ChatPanel({ profile, availability, messages, dispatch, onSend, busy, er
         <p className="bibi-chat-notice">{availability.detail}</p>
       ) : null}
 
+      <section className="bibi-conversation-list" aria-label="대화 선택">
+        <div className="bibi-conversation-actions">
+          <h3>대화</h3>
+          <button type="button" onClick={onNewConversation} disabled={busy}>새 대화</button>
+        </div>
+        <ul>
+          {(conversations ?? []).map((item) => (
+            <li key={item.id} className={item.id === conversation?.id ? "is-active" : ""}>
+              <div>
+                <strong>{item.title || (item.origin_channel === "telegram" ? "Telegram 대화" : "웹 대화")}</strong>
+                <span>
+                  {item.origin_channel === "telegram" ? "Telegram에서 시작" : "웹에서 시작"}
+                  {" · 동기화 "}{item.sync_status ?? "UNKNOWN"}
+                </span>
+              </div>
+              {item.id === conversation?.id
+                ? <span className="bibi-current-conversation">현재 대화</span>
+                : <button type="button" onClick={() => onSelectConversation(item)} disabled={busy}>이 대화 계속하기</button>}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <p className="bibi-chat-sync" role="status">
+        {conversation?.origin_channel === "telegram" ? "Telegram에서 시작 · " : "웹에서 시작 · "}
+        동기화 {conversation?.sync_status ?? "UNKNOWN"} · Telegram 미러링 꺼짐
+      </p>
+
       <ol className="bibi-messages" ref={messagesRef}>
         {messages.map((message) => (
           <li key={message.id} className={`bibi-message is-${message.role}`}>
-            <span className="bibi-message-role">{message.role === "user" ? "나" : profile?.display_name ?? "비비"}</span>
+            <span className="bibi-message-role">
+              {message.role === "user" ? "나" : profile?.display_name ?? "비비"}
+              {message.channel === "telegram" ? " · Telegram" : " · Web"}
+            </span>
             <p>{message.body}</p>
           </li>
         ))}
@@ -258,6 +291,7 @@ function ChatPanel({ profile, availability, messages, dispatch, onSend, busy, er
           }}
         />
         <button type="submit" disabled={busy || !draft.trim()}>보내기</button>
+        <small>이 답변은 현재 웹 타임라인에만 표시됩니다. Telegram 미러링은 지원 계약 확인 전까지 꺼져 있습니다.</small>
       </form>
     </section>
   );
@@ -694,9 +728,12 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   const [archive, setArchive] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [artifacts, setArtifacts] = useState([]);
+  const [organizationState, setOrganizationState] = useState({ revision: 0, nodes: [], audit: [] });
+  const [runtimeProjection, setRuntimeProjection] = useState({ inventory: [], health: [] });
   const [openWorkId, setOpenWorkId] = useState(null);
   const [workDetail, setWorkDetail] = useState(null);
   const [activeProfileId, setActiveProfileId] = useState(CEO_PROFILE_ID);
+  const [conversations, setConversations] = useState([]);
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [chatDispatch, setChatDispatch] = useState([]);
@@ -765,15 +802,17 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   // ---- workspace snapshot --------------------------------------------------
   const loadSnapshot = useCallback(async () => {
     if (!cloud.configured || !ownerId) return null;
-    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows] = await Promise.all([
+    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, organizationRows, runtimeRows] = await Promise.all([
       loadRoster(),
       loadConnectorState(),
       loadWorkItems(),
       loadConversationArchive(),
       loadMeetings(),
       loadDataRoomArtifacts(),
+      loadOrganizationState(ownerId),
+      loadRuntimeProjection(),
     ]);
-    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows };
+    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, organizationRows, runtimeRows };
   }, [cloud.configured, ownerId]);
 
   const applySnapshot = useCallback((snapshot) => {
@@ -786,6 +825,8 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     setArchive(snapshot.archiveRows);
     setMeetings(snapshot.meetingRows);
     setArtifacts(snapshot.artifactRows);
+    setOrganizationState(snapshot.organizationRows);
+    setRuntimeProjection(snapshot.runtimeRows);
     setError("");
   }, []);
 
@@ -849,13 +890,35 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       onMessage: (row) => {
         if (!row?.id) return;
         setCloudRevision((current) => current + 1);
+        void refresh();
         if (row.conversation_id !== conversation?.id) return;
         setMessages((current) => (current.some((message) => message.id === row.id) ? current : [...current, row]));
       },
-      onMeeting: () => setCloudRevision((current) => current + 1),
-      onMeetingParticipant: () => setCloudRevision((current) => current + 1),
-      onResult: () => setCloudRevision((current) => current + 1),
-      onEvidence: () => setCloudRevision((current) => current + 1),
+      onMeeting: () => { setCloudRevision((current) => current + 1); void refresh(); },
+      onMeetingParticipant: () => { setCloudRevision((current) => current + 1); void refresh(); },
+      onResult: () => { setCloudRevision((current) => current + 1); void refresh(); },
+      onEvidence: () => { setCloudRevision((current) => current + 1); void refresh(); },
+      onOrganization: (row) => {
+        if (!row?.owner_id || row.owner_id !== ownerId) return;
+        setOrganizationState(row);
+        setCloudRevision((current) => current + 1);
+      },
+      onPluginInventory: (row) => {
+        if (!row?.profile_id) return;
+        setRuntimeProjection((current) => ({
+          ...current,
+          inventory: [row, ...current.inventory.filter((item) => item.profile_id !== row.profile_id)],
+        }));
+        setCloudRevision((current) => current + 1);
+      },
+      onRuntimeHealth: (row) => {
+        if (!row?.profile_id) return;
+        setRuntimeProjection((current) => ({
+          ...current,
+          health: [row, ...current.health.filter((item) => item.profile_id !== row.profile_id)],
+        }));
+        setCloudRevision((current) => current + 1);
+      },
       // Realtime replays nothing that happened while the socket was down, so a
       // reconnect refetches instead of trusting the local cache.
       onResync: refresh,
@@ -884,6 +947,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
         const current = conversations[0]
           ?? await startConversation({ ownerId, profileId: activeProfileId });
         if (!active) return;
+        setConversations(conversations.length ? conversations : [current]);
         setConversation(current);
         if (!current?.id) {
           setMessages([]);
@@ -968,9 +1032,11 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       archive,
       meetings,
       artifacts,
+      organization: organizationState,
+      runtime: runtimeProjection,
       revision: cloudRevision,
     });
-  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, cloudRevision]);
+  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, organizationState, runtimeProjection, cloudRevision]);
 
   // ---- auth transition -----------------------------------------------------
   // Every screen before this one is a short card and this one is a long
@@ -987,6 +1053,42 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   }, [signedInWorkspace]);
 
   // ---- actions -------------------------------------------------------------
+  const handleSelectConversation = useCallback(async (nextConversation) => {
+    if (!nextConversation?.id) return;
+    setBusy(true);
+    try {
+      const [nextMessages, nextDispatch] = await Promise.all([
+        loadMessages(nextConversation.id),
+        loadChatDispatch(nextConversation.id),
+      ]);
+      setConversation(nextConversation);
+      setMessages(nextMessages);
+      setChatDispatch(nextDispatch);
+      setError("");
+    } catch (selectError) {
+      setError(selectError.message);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const handleNewConversation = useCallback(async () => {
+    if (!ownerId) return;
+    setBusy(true);
+    try {
+      const created = await startConversation({ ownerId, profileId: activeProfileId });
+      setConversations((current) => [created, ...current]);
+      setConversation(created);
+      setMessages([]);
+      setChatDispatch([]);
+      setError("");
+    } catch (createError) {
+      setError(createError.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [ownerId, activeProfileId]);
+
   const handleSend = useCallback(async (body) => {
     if (!conversation?.id) return;
     setBusy(true);
@@ -1163,7 +1265,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       return (
         <div className="bibi-layout bibi-layout-chat">
           <RosterRail roster={roster} activeProfileId={activeProfileId} availabilityFor={availabilityFor} onSelect={setActiveProfileId} />
-          <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} messages={messages} dispatch={chatDispatch} onSend={handleSend} busy={busy} error={error} />
+          <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} conversation={conversation} conversations={conversations} messages={messages} dispatch={chatDispatch} onSend={handleSend} onSelectConversation={handleSelectConversation} onNewConversation={handleNewConversation} busy={busy} error={error} />
         </div>
       );
     }
@@ -1179,7 +1281,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     return (
       <div className="bibi-layout">
         <RosterRail roster={roster} activeProfileId={activeProfileId} availabilityFor={availabilityFor} onSelect={setActiveProfileId} />
-        <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} messages={messages} dispatch={chatDispatch} onSend={handleSend} busy={busy} error={error} />
+        <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} conversation={conversation} conversations={conversations} messages={messages} dispatch={chatDispatch} onSend={handleSend} onSelectConversation={handleSelectConversation} onNewConversation={handleNewConversation} busy={busy} error={error} />
         <aside className="bibi-side">
           <WorkIntake roster={roster} defaultProfileId={activeProfileId} availabilityFor={availabilityFor} onFile={handleFile} busy={busy} />
           <WorkBoard workItems={workItems} detail={openWorkDetail} openId={openWorkId} onOpen={setOpenWorkId} onCancel={handleCancel} />

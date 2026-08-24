@@ -60,7 +60,8 @@ test("Instagram is one canonical shared integration inside the standard plugin g
   assert.match(hub, /connectInstagram\(INSTAGRAM_OWNER_PROFILE\)/);
   assert.match(hub, /disconnectInstagram\(INSTAGRAM_OWNER_PROFILE, selectedAccountId\)/);
   assert.match(hub, /<article className=\{`plugin-card instagram-plugin-card/);
-  assert.match(hub, /<div className="plugin-grid official-toolset-grid">\s*<InstagramIntegrationCard filter=\{filter\} \/>/);
+  assert.match(hub, /<div className="plugin-grid official-toolset-grid">\s*\{!adapter && <InstagramIntegrationCard filter=\{filter\} \/>\}/);
+  assert.match(hub, /loadOfficialTools\(selectedProfile, adapter\)/);
   assert.doesNotMatch(hub, /<InstagramIntegrationCard key=\{selectedProfile\}/);
   assert.doesNotMatch(hub, /loadInstagramStatus\(profileName\)/);
 });

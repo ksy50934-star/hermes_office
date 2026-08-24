@@ -196,7 +196,7 @@ test("legacy gateway consumers are not mounted behind any Bibi owner-data view",
   const app = await read("src/App.jsx");
 
   assert.match(app, /\{specialistSurfaceReady && view === "meeting" && effectiveMeetings\.length > 0 && \(/);
-  assert.match(app, /\{view === "terminal" && \(/);
+  assert.match(app, /\{specialistSurfaceReady && view === "terminal" && \(/);
   assert.match(app, /\{specialistSurfaceReady && !bibiCloudView && \(\s*<section[\s\S]*?persistent-chat-runtime/);
   assert.match(app, /\{specialistSurfaceReady && bibiCloudView && view === "chat"/);
 });

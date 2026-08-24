@@ -4,8 +4,8 @@
 - 작업 ID: `HOFFICE-NEW-001-AUTH`
 - 저장소: `/Users/siyoung/projects/hermes-office-bibi-new`
 - 브랜치: `bibi-workspace-v1` (혼합 작업본 worktree, 기존 변경 보존 필수)
-- 정본 브리프: `/Users/siyoung/Documents/Siyoung-Bibi-Wiki/Bibi-18-Control-Center/05-Work-Intake/HOFFICE-NEW-001-AUTHORITATIVE-BRIEF.md`
-- 정책 원장: `/Users/siyoung/Documents/Siyoung-Bibi-Wiki/Bibi-Policy-Enforcement/policy-registry.json` (registry 2.14.0)
+- 현행 요구사항 정본: `/Users/siyoung/projects/hermes-office-bibi-new/docs/bibi-workspace/01-ARCHITECTURE.md`
+- 역할·정책 정본: `/Users/siyoung/Documents/bibi-world/bibi-01/profile.json` 및 현재 프로젝트 문서. 구형 Wiki 정책은 상속하지 않는다.
 - 정본 클라우드: Supabase ref `morvnoyyncluohmwxmuh` / Vercel project `bibi-workspace-18` (`prj_f15FG9Tem1Ios8YSC5CeDG1BUn7Z`)
 - Production: https://bibi-workspace-18.vercel.app
 - 증거 디렉터리: `docs/bibi-workspace/evidence/HOFFICE-NEW-001-auth/`

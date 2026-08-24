@@ -6,16 +6,32 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("owner-data routes keep specialist renderers behind the authenticated cloud controller", async () => {
   const [surface, app] = await Promise.all([read("src/bibi/surface.js"), read("src/App.jsx")]);
-  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "command", "data", "sessions", "team"]) {
+  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "command", "data", "sessions", "team", "plugins", "system", "terminal"]) {
     assert.match(surface, new RegExp(`\\b${view}\\b`), `${view} must be a Bibi surface`);
   }
   assert.match(app, /<BibiWorkspace\s+surface=\{view\}/);
   assert.match(app, /controllerOnly=\{!bibiSurface\}/);
   assert.match(app, /view === "office"[\s\S]*?<HermesOffice/);
   assert.match(app, /view === "meeting"[\s\S]*?<MeetingLobby/);
-  assert.match(app, /view === "data"[\s\S]*?<BibiDataRoom/);
+  assert.match(app, /view === "data"[\s\S]*?<DataRoom adapter=\{bibiCloudView \? bibiDataRoomAdapter : null\}/);
+  assert.doesNotMatch(app, /view === "data"[\s\S]{0,800}<BibiDataRoom/);
   assert.match(app, /view === "chat"[\s\S]*?<BibiDirectChat/);
+  for (const view of ["plugins", "system", "terminal"]) {
+    assert.match(app, new RegExp(`specialistSurfaceReady && view === "${view}"`));
+  }
   assert.match(app, /if \(bibiCloudView\) return undefined;/);
+});
+
+test("cloud views never start the legacy organization bridge loader", async () => {
+  const app = await read("src/App.jsx");
+  assert.match(
+    app,
+    /useEffect\(\(\) => \{\s*if \(bibiCloudView\) return undefined;\s*let stopped = false;\s*loadOrganization\(\)/,
+  );
+  assert.match(
+    app,
+    /return \(\) => \{ stopped = true; \};\s*\}, \[bibiCloudView\]\);/,
+  );
 });
 
 test("meeting and data room contracts are durable, owner scoped, and provenance preserving", async () => {

@@ -79,11 +79,12 @@ function mediaBlock(css, query) {
 test("the Bibi surface is identified by one shared predicate", () => {
   assert.equal(BIBI_VIEW_ID, "ceo");
   assert.equal(isBibiSurface("ceo"), true);
-  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team"]) {
+  for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team", "plugins", "system", "terminal"]) {
     assert.equal(isBibiCloudView(view), true, `${view} is an owner-data Bibi route`);
   }
-  for (const other of ["plugins", "system", "terminal", "", null, undefined]) {
-    assert.equal(isBibiSurface(other), false, `${String(other)} remains a legacy system surface`);
+  for (const other of ["", null, undefined]) {
+    assert.equal(isBibiCloudView(other), false, `${String(other)} is not a cloud route`);
+    assert.equal(isBibiSurface(other), false, `${String(other)} is not the CEO renderer`);
   }
 });
 

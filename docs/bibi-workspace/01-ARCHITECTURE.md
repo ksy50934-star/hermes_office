@@ -203,11 +203,12 @@ dispatch does not bury deliberate work.
 
 ## 10. Deployment status
 
-No functional gaps remain in this repository, and the deployed system has been
-exercised for real. The `bibi-workspace-18` Vercel project is live with its
-production target Ready at <https://bibi-workspace-18.vercel.app>, the Supabase
-project is linked, and migrations `…000100` through `…000600` — all six — are
-applied to the remote database.
+The cloud control-plane path described in §5 and §9 has been exercised for real,
+but cross-channel conversation continuity is not implemented. The
+`bibi-workspace-18` Vercel project is live with its production target Ready at
+<https://bibi-workspace-18.vercel.app>, the Supabase project is linked, and
+migrations `…000100` through `…000600` — all six — are applied to the remote
+database.
 
 The whole path in §5 and §9 has been run end to end against that deployment: a
 chat turn on `bibi-02` became a leased command, an outbound connector on this Mac
@@ -215,7 +216,10 @@ claimed it, the Hermes CLI ran it, and the assistant reply was written back into
 the same conversation with its evidence rows. Nothing about the lifecycle,
 lease or write-back is untested against the live system any more.
 
-What remains is provisioning, not code:
+The verified work lifecycle does not imply that Telegram and web chat share one
+conversation. That gap is design and implementation work, recorded in §11.
+
+Provisioning items also remain:
 
 | Outstanding | Why |
 |---|---|
@@ -229,3 +233,199 @@ design rather than by omission.
 `00-OVERVIEW.md` holds the canonical status block, the evidence and the two
 remaining owner steps. This session did not create permanent accounts, issue
 permanent tokens, or modify the live Hermes runtime.
+
+## 11. Required design: cross-channel conversation continuity
+
+### 11.1 Current verified boundary
+
+Telegram and web chat currently create different records even when they target
+the same Bibi profile:
+
+| Channel | Durable identity | Store | Hermes execution |
+|---|---|---|---|
+| Telegram | Hermes `session_id` plus Telegram DM origin | profile-local `state.db` | Telegram adapter continues the channel session |
+| Web cloud chat | Supabase `conversation_id` | Supabase `conversations` / `messages` | connector runs a new `hermes chat --source tool` subprocess turn |
+
+Sharing a physical profile or a `state.db` file does not make two sessions the
+same conversation. Production `/hermes/api/*` currently resolves to the SPA HTML
+rather than a Hermes JSON/API relay, so the deployed browser cannot use the
+upstream `session.resume` UI path as a substitute for synchronization.
+
+### 11.2 Product invariant
+
+The workspace must present a single continuous conversation when the same owner
+explicitly opens the same Bibi thread across Telegram and web. Channel origin is
+message provenance, not a reason to lose history or context. Unrelated threads
+must remain separate even when they belong to the same owner and profile.
+
+### 11.3 Canonical identity model
+
+Introduce an owner-scoped canonical conversation and explicit channel bindings:
+
+```text
+canonical_conversation
+  owner_id
+  organization_profile_id
+  execution_profile_id
+  title / lifecycle / retention state
+
+conversation_binding
+  canonical_conversation_id
+  channel                  # telegram | web | future channel
+  external_conversation_id # Supabase conversation id or channel thread id
+  hermes_session_id
+  channel_account_id
+  binding state / verified_at
+```
+
+Required properties:
+
+- CEO role slot `bibi-01` maps to execution profile `default`; the rollback
+  `profiles/bibi-01` directory is never bindable.
+- A Telegram identity is paired to one Supabase owner before its messages can be
+  projected into that owner's workspace.
+- A binding is unique within owner, profile and channel scope. The system never
+  guesses a binding from display names.
+- Starting a new thread creates a new canonical conversation; choosing an
+  existing thread resumes it.
+
+### 11.4 Message projection
+
+Keep the profile-local Hermes session as the execution/context record and project
+messages to the cloud through the existing outbound-only connector. Do not open
+an inbound port to the Mac.
+
+The projection requires:
+
+1. Per-profile `state.db` checkpoints so only committed changes are uploaded.
+2. Stable idempotency keys derived from profile, Hermes session and message id.
+3. Provenance fields for channel, Hermes session, source message and projected
+   timestamp.
+4. Deterministic ordering using source sequence plus timestamp; arrival time is
+   not sufficient after offline replay.
+5. Tombstone/archive events for deletions and retention changes rather than
+   silent divergence.
+6. Content and attachment handling rules that prevent local paths, credentials,
+   tool payloads and hidden runtime context from reaching the browser.
+
+Supabase is the owner-scoped query projection for the deployed UI; it is not
+allowed to fabricate Hermes context or overwrite `state.db` history.
+
+### 11.5 Continuing a conversation from web
+
+Each web turn must carry the bound Hermes session id to the connector. The
+executor resumes that session through a verified Hermes continuation contract
+instead of starting an unbound `--source tool` session on every turn.
+
+The continuation design must specify:
+
+- the supported Hermes CLI or Gateway resume operation and its exact result;
+- behavior when a session is running, expired, archived or unavailable;
+- lease ownership so two web turns cannot resume the same session concurrently;
+- idempotent retry after a dropped connector report;
+- creation and binding of a replacement session only after an explicit,
+  auditable continuation failure.
+
+### 11.6 Delivery and mirroring policy
+
+Context continuity, archive visibility and channel delivery are separate
+controls:
+
+- **Context continuity:** both channels address the same Hermes session.
+- **Archive visibility:** both channels' messages appear in the web timeline.
+- **Channel mirroring:** a web-originated message or answer is optionally echoed
+  into Telegram.
+
+Before implementation, decide whether web-originated turns are always mirrored
+to Telegram, mirrored only when the thread was opened from Telegram, or shown in
+Telegram as a compact continuation notice. The selected policy must prevent bot
+loops and duplicate delivery.
+
+### 11.7 UX requirements
+
+- Conversation lists show Bibi, title, last activity and channel provenance.
+- A Telegram-origin thread is visibly marked but opens like any other thread.
+- The composer states whether the reply will also be delivered to Telegram.
+- “New conversation” remains distinct from “continue this conversation.”
+- Concurrent activity, offline projection and sync failure are explicit states;
+  the UI does not optimistically claim synchronization.
+- Archive, search, unread state and attachments operate on the canonical
+  conversation rather than browser-local storage.
+
+### 11.8 Security and governance
+
+- Preserve the outbound-only Mac boundary.
+- Apply RLS to canonical conversations, bindings and projected messages.
+- Store only the minimum Telegram account/chat identifiers required for a
+  verified binding; do not expose bot tokens or raw connector credentials.
+- Record append-only audit events for pairing, binding, resume, replacement,
+  delivery and unbinding.
+- Define retention, export and deletion semantics across both Supabase and local
+  Hermes history before exposing delete controls.
+- Reject cross-profile and cross-owner session ids at the API, connector and
+  database layers.
+
+### 11.9 Reconciliation and observability
+
+The connector must report checkpoint lag, projection failures, binding errors
+and resume failures. A reconciliation job compares per-session counts and hashes
+between the allowed local projection and cloud rows without uploading hidden
+tool content. Restart and offline replay must converge without duplicates.
+
+### 11.10 Migration and rollout
+
+1. Add canonical conversation, binding, projection checkpoint and audit schema.
+2. Build read-only outbound projection and backfill existing Telegram sessions.
+3. Render projected Telegram sessions in the web archive.
+4. Add verified session continuation for web turns.
+5. Add the approved Telegram mirroring policy.
+6. Roll out one profile at a time, beginning with `bibi-07`; preserve rollback
+   to the existing Supabase-only web chat until reconciliation passes.
+
+### 11.11 Completion evidence
+
+Cross-channel continuity is PASS only when a unique test turn proves all of the
+following:
+
+1. A Telegram message is stored in the intended profile's `state.db`.
+2. The same message appears under the mapped canonical conversation in
+   Production web.
+3. A web follow-up resumes the same Hermes context rather than creating an
+   unrelated tool session.
+4. The answer appears once in the web timeline and, when mirroring is enabled,
+   once in Telegram.
+5. No other profile or owner's database, conversation or channel receives it.
+6. Connector restart and offline replay preserve ordering and create no
+   duplicate messages.
+7. The local Mac still exposes no inbound service and all authorization and RLS
+   checks pass.
+
+Until every item is demonstrated by DB/API/UI readback, the feature remains
+`UNKNOWN/UNVERIFIED` or `FAIL`; session existence alone is not completion.
+
+### 11.12 Implementation status (2026-08-24)
+
+The local code now implements the production-capable `bibi-07` pilot path with
+18-role identity validation: migration `20260824000800` adds forced-RLS
+bindings, projections, checkpoints, exclusive resume leases and append-only
+audit events; the connector reads only active plain user/assistant rows from a
+verified Telegram session and uploads them over its existing authenticated
+outbound HTTPS transport; and bound web turns verify the profile-local session
+metadata before invoking the installed CLI with `--resume SESSION_ID`.
+
+The cloud timeline renders channel provenance and honest sync status, and keeps
+“새 대화” separate from “이 대화 계속하기”. Telegram mirroring remains
+disabled and unsupported because no safe delivery contract was established.
+
+Migrations `…000800` through `…001200` are applied to the linked remote
+project. A one-shot connector run projected all 18 profiles with zero upload
+failures; owner readback returned 18 inventory and 18 health rows, a temporary
+second owner returned zero rows, and an authenticated Realtime subscription
+received the `bibi-02` update. A durable cloud work item also completed through
+`bibi-02` with one result and three evidence rows.
+
+Those runtime and execution checks do not by themselves satisfy the seven
+cross-channel completion checks in §11.11. Telegram mirroring remains disabled,
+no Telegram message was sent for this verification, and a release still requires
+current Production browser/readback evidence for the exact deployed revision.
+Do not infer deployment status from this document alone.

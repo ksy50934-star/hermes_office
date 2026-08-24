@@ -8,6 +8,7 @@
  * policy left to catch a mistake.
  */
 
+import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { loadServerEnv } from "./serverEnv.js";
 
@@ -56,6 +57,115 @@ export function createWorkspaceStore(supabase) {
       );
     },
 
+    async upsertRuntimeProjection({ ownerId, connectorNodeId, profileId, inventory, health, collectedAt }) {
+      const [inventoryRows, healthRows] = await Promise.all([
+        supabase.from("bibi_plugin_inventory").upsert({
+          owner_id: ownerId,
+          node_id: connectorNodeId,
+          profile_id: profileId,
+          catalog: inventory.catalog,
+          servers: inventory.servers,
+          toolsets: inventory.toolsets,
+          collection_errors: inventory.errors,
+          collected_at: collectedAt,
+          updated_at: collectedAt,
+        }, { onConflict: "owner_id,profile_id" }).select("profile_id"),
+        supabase.from("bibi_runtime_health").upsert({
+          owner_id: ownerId,
+          node_id: connectorNodeId,
+          profile_id: profileId,
+          hermes_version: health.hermesVersion,
+          model: health.model,
+          provider: health.provider,
+          gateway_status: health.gatewayStatus,
+          active_sessions: health.activeSessions,
+          enabled_toolsets: health.enabledToolsets,
+          disabled_toolsets: health.disabledToolsets,
+          health_error: health.error,
+          collected_at: collectedAt,
+          updated_at: collectedAt,
+        }, { onConflict: "owner_id,profile_id" }).select("profile_id"),
+      ]);
+      unwrap(inventoryRows, "upsertRuntimeProjection.inventory");
+      unwrap(healthRows, "upsertRuntimeProjection.health");
+    },
+
+    async listProjectionTargets({ ownerId }) {
+      const bindings = unwrap(
+        await supabase
+          .from("conversation_bindings")
+          .select("id, conversation_id, organization_profile_id, execution_profile_id, hermes_session_id, channel")
+          .eq("owner_id", ownerId)
+          .eq("channel", "telegram")
+          .eq("binding_state", "verified"),
+        "listProjectionTargets.bindings",
+      ) ?? [];
+      if (!bindings.length) return [];
+      const checkpoints = unwrap(
+        await supabase
+          .from("projection_checkpoints")
+          .select("binding_id, last_source_message_id")
+          .eq("owner_id", ownerId)
+          .in("binding_id", bindings.map((binding) => binding.id)),
+        "listProjectionTargets.checkpoints",
+      ) ?? [];
+      const checkpointByBinding = new Map(checkpoints.map((row) => [row.binding_id, Number(row.last_source_message_id ?? 0)]));
+      const workLinks = unwrap(
+        await supabase
+          .from("work_items")
+          .select("id, binding_id, request_message_id, brief, created_at")
+          .eq("owner_id", ownerId)
+          .eq("continuation_status", "bound")
+          .in("binding_id", bindings.map((binding) => binding.id))
+          .not("request_message_id", "is", null)
+          .order("created_at", { ascending: true })
+          .limit(500),
+        "listProjectionTargets.workLinks",
+      ) ?? [];
+      const linksByBinding = new Map();
+      for (const work of workLinks) {
+        const links = linksByBinding.get(work.binding_id) ?? [];
+        links.push({
+          workItemId: work.id,
+          requestMessageId: work.request_message_id,
+          bodySha256: createHash("sha256").update(String(work.brief ?? "")).digest("hex"),
+        });
+        linksByBinding.set(work.binding_id, links);
+      }
+      return bindings.map((binding) => ({
+        bindingId: binding.id,
+        conversationId: binding.conversation_id,
+        organizationProfileId: binding.organization_profile_id,
+        executionProfileId: binding.execution_profile_id,
+        hermesSessionId: binding.hermes_session_id,
+        channel: binding.channel,
+        checkpoint: checkpointByBinding.get(binding.id) ?? 0,
+        canonicalLinks: linksByBinding.get(binding.id) ?? [],
+      }));
+    },
+
+    async applyProjection({ ownerId, target, messages }) {
+      const data = unwrap(
+        await supabase.rpc("bibi_apply_message_projection", {
+          p_owner_id: ownerId,
+          p_binding_id: target.bindingId,
+          p_conversation_id: target.conversationId,
+          p_organization_profile_id: target.organizationProfileId,
+          p_execution_profile_id: target.executionProfileId,
+          p_hermes_session_id: target.hermesSessionId,
+          p_channel: target.channel,
+          p_messages: messages,
+        }),
+        "applyProjection",
+      );
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        accepted: Number(row?.accepted ?? 0),
+        duplicates: Number(row?.duplicates ?? 0),
+        checkpoint: Number(row?.checkpoint ?? target.checkpoint),
+      };
+    },
+
     async claimWork({ ownerId, connectorNodeId, max, leaseTtlMs }) {
       const data = unwrap(
         await supabase.rpc("bibi_claim_work", {
@@ -71,6 +181,12 @@ export function createWorkspaceStore(supabase) {
         profileId: row.profile_id,
         kind: row.kind,
         conversationId: row.conversation_id,
+        bindingId: row.binding_id,
+        hermesSessionId: row.hermes_session_id,
+        channelOrigin: row.channel_origin,
+        continuationStatus: row.continuation_status,
+        resumeLeaseId: row.resume_lease_id,
+        turnIdempotencyKey: row.turn_idempotency_key,
         title: row.title,
         brief: row.brief,
         attempt: row.attempt,
@@ -103,6 +219,14 @@ export function createWorkspaceStore(supabase) {
           .select("id"),
         "renewLease.workItem",
       );
+      unwrap(
+        await supabase.rpc("bibi_renew_resume_lease", {
+          p_owner_id: ownerId,
+          p_work_item_id: workItemId,
+          p_expires_at: data[0].expires_at,
+        }),
+        "renewLease.resume",
+      );
       return { expiresAt: data[0].expires_at };
     },
 
@@ -133,6 +257,14 @@ export function createWorkspaceStore(supabase) {
         kind: data.kind,
         conversationId: data.conversation_id,
         requestMessageId: data.request_message_id,
+        bindingId: data.binding_id,
+        hermesSessionId: data.hermes_session_id,
+        channelOrigin: data.channel_origin,
+        continuationStatus: data.continuation_status,
+        turnIdempotencyKey: data.turn_idempotency_key,
+        executionStartedAt: data.execution_started_at,
+        executionCompletedAt: data.execution_completed_at,
+        reconciliationStatus: data.reconciliation_status,
         createdAt: data.created_at,
         updatedAt: data.updated_at,
         // The lifecycle reducer needs an applied-event list. Replay protection
@@ -140,6 +272,38 @@ export function createWorkspaceStore(supabase) {
         // list here is correct rather than a gap.
         appliedEventIds: [],
       };
+    },
+
+    async applyReportAtomically({
+      ownerId, connectorNodeId, workItemId, eventId, type, attempt,
+      turnIdempotencyKey, summary, detail, error, reason, evidence, payload, at,
+    }) {
+      const { data, error: rpcError } = await supabase.rpc("bibi_apply_work_report", {
+        p_owner_id: ownerId,
+        p_connector_node_id: connectorNodeId,
+        p_work_item_id: workItemId,
+        p_event_id: eventId,
+        p_event_type: type,
+        p_attempt: attempt,
+        p_turn_idempotency_key: turnIdempotencyKey,
+        p_summary: summary,
+        p_detail: detail,
+        p_error: error,
+        p_reason: reason,
+        p_evidence: evidence,
+        p_payload: payload,
+        p_at: at,
+      });
+      if (rpcError) {
+        const mapped = new Error(rpcError.message);
+        if (/work item not found/i.test(rpcError.message)) mapped.code = "WORK_ITEM_NOT_FOUND";
+        else if (/report identity mismatch/i.test(rpcError.message)) mapped.code = "REPORT_IDENTITY_MISMATCH";
+        else if (/reason is required/i.test(rpcError.message)) mapped.code = "MISSING_REASON";
+        else if (/invalid transition/i.test(rpcError.message)) mapped.code = "INVALID_TRANSITION";
+        throw mapped;
+      }
+      const row = Array.isArray(data) ? data[0] : data;
+      return { duplicate: Boolean(row?.duplicate), status: row?.status, resultId: row?.result_id ?? null };
     },
 
     async recordEvent({ ownerId, workItemId, eventId, eventType, payload, at }) {
@@ -239,6 +403,14 @@ export function createWorkspaceStore(supabase) {
           .is("released_at", null)
           .select("id"),
         "releaseLease",
+      );
+      unwrap(
+        await supabase.rpc("bibi_release_resume_lease", {
+          p_owner_id: ownerId,
+          p_work_item_id: workItemId,
+          p_reason: reason,
+        }),
+        "releaseLease.resume",
       );
     },
 

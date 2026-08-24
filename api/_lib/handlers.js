@@ -11,8 +11,8 @@
  * before applying it so a replay is a duplicate rather than a second effect.
  */
 
-import { WorkLifecycleError, applyWorkEvent } from "../../src/bibi/workLifecycle.js";
-import { isExecutionProfileId, toExecutionProfileId } from "../../src/bibi/roster.js";
+import { isBibiProfileId, isExecutionProfileId, toExecutionProfileId } from "../../src/bibi/roster.js";
+import { ProjectionError, validateProjectionTarget } from "../../connector/messageProjection.js";
 
 const REPORT_TYPES = new Set(["start", "succeed", "fail", "release", "block"]);
 
@@ -48,6 +48,71 @@ export async function handleHeartbeat({ auth, body, store, now = () => new Date(
   });
 }
 
+function boundedText(value, max = 500) {
+  return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+function boundedList(value, max) {
+  return Array.isArray(value) ? value.slice(0, max) : [];
+}
+
+export async function handleRuntimeProjection({ auth, body, store }) {
+  const profileId = body?.profileId;
+  const executionProfileId = body?.executionProfileId;
+  const collectedAt = body?.collectedAt;
+  if (!isBibiProfileId(profileId) || !isExecutionProfileId(executionProfileId)
+    || toExecutionProfileId(profileId) !== executionProfileId
+    || !Number.isFinite(Date.parse(collectedAt ?? ""))) {
+    return failure(400, "INVALID_RUNTIME_PROJECTION_IDENTITY", "Runtime projection profile identity is invalid.");
+  }
+
+  const inventory = {
+    catalog: boundedList(body?.inventory?.catalog, 100).map((item) => ({
+      name: boundedText(item?.name, 120), label: boundedText(item?.label, 200),
+      description: boundedText(item?.description, 500), category: boundedText(item?.category, 80),
+      provider: boundedText(item?.provider, 120), needs_config: Boolean(item?.needs_config), installed: Boolean(item?.installed),
+    })).filter((item) => item.name),
+    servers: boundedList(body?.inventory?.servers, 100).map((item) => ({
+      name: boundedText(item?.name, 120), label: boundedText(item?.label, 200),
+      status: boundedText(item?.status, 80), transport: boundedText(item?.transport, 300),
+      enabled: Boolean(item?.enabled), tools: boundedList(item?.tools, 200).map((tool) => boundedText(tool, 120)).filter(Boolean),
+    })).filter((item) => item.name),
+    toolsets: boundedList(body?.inventory?.toolsets, 100).map((item) => ({
+      name: boundedText(item?.name, 120), label: boundedText(item?.label, 200),
+      description: boundedText(item?.description, 500), enabled: Boolean(item?.enabled),
+      available: item?.available !== false, configured: item?.configured !== false,
+      tools: boundedList(item?.tools, 200).map((tool) => boundedText(tool, 120)).filter(Boolean),
+    })).filter((item) => item.name),
+    errors: boundedList(body?.inventory?.errors, 20).map((item) => ({
+      source: boundedText(item?.source, 80), message: boundedText(item?.message, 300),
+    })),
+  };
+  const gatewayStatus = new Set(["running", "stopped", "unknown", "error"]).has(body?.health?.gatewayStatus)
+    ? body.health.gatewayStatus : "unknown";
+  const activeSessions = Number.isInteger(body?.health?.activeSessions) && body.health.activeSessions >= 0
+    ? body.health.activeSessions : null;
+  const health = {
+    hermesVersion: boundedText(body?.health?.hermesVersion, 80) || null,
+    model: boundedText(body?.health?.model, 200) || null,
+    provider: boundedText(body?.health?.provider, 120) || null,
+    gatewayStatus,
+    activeSessions,
+    enabledToolsets: Math.max(0, Number.parseInt(body?.health?.enabledToolsets ?? 0, 10) || 0),
+    disabledToolsets: Math.max(0, Number.parseInt(body?.health?.disabledToolsets ?? 0, 10) || 0),
+    error: boundedText(body?.health?.error, 500) || null,
+  };
+
+  await store.upsertRuntimeProjection({
+    ownerId: auth.ownerId,
+    connectorNodeId: auth.connectorNodeId,
+    profileId,
+    inventory,
+    health,
+    collectedAt,
+  });
+  return success({ ok: true, profileId, collectedAt });
+}
+
 export async function handlePoll({ auth, body, store, now = () => new Date().toISOString(), leaseTtlMs = 300_000, maxBatch = 4 }) {
   const requested = Number(body?.max);
   const max = Number.isInteger(requested) && requested > 0 ? Math.min(requested, maxBatch) : maxBatch;
@@ -76,12 +141,63 @@ export async function handlePoll({ auth, body, store, now = () => new Date().toI
       // executor has to be able to tell them apart.
       kind: item.kind ?? "work",
       conversationId: item.conversationId ?? null,
+      bindingId: item.bindingId ?? null,
+      hermesSessionId: item.hermesSessionId ?? null,
+      channelOrigin: item.channelOrigin ?? null,
+      continuationStatus: item.continuationStatus ?? "unbound",
+      resumeLeaseId: item.resumeLeaseId ?? null,
+      turnIdempotencyKey: item.turnIdempotencyKey ?? null,
       title: item.title,
       brief: item.brief,
       leaseId: item.leaseId,
       leaseExpiresAt: item.leaseExpiresAt,
     })),
   });
+}
+
+export async function handleProjectionTargets({ auth, store }) {
+  const targets = await store.listProjectionTargets({
+    ownerId: auth.ownerId,
+    connectorNodeId: auth.connectorNodeId,
+  });
+  return success({ targets });
+}
+
+export async function handleProjectionUpload({ auth, body, store }) {
+  let target;
+  try {
+    target = validateProjectionTarget(body?.target);
+  } catch (error) {
+    if (error instanceof ProjectionError) return failure(400, error.code, error.message);
+    throw error;
+  }
+
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  if (!messages.length || messages.length > 500) {
+    return failure(400, "INVALID_PROJECTION_BATCH", "Projection batch must contain 1 to 500 messages.");
+  }
+  for (const message of messages) {
+    const sameIdentity = message?.bindingId === target.bindingId
+      && message?.conversationId === target.conversationId
+      && message?.organizationProfileId === target.organizationProfileId
+      && message?.executionProfileId === target.executionProfileId
+      && message?.hermesSessionId === target.hermesSessionId
+      && message?.channel === target.channel;
+    const validMessage = sameIdentity
+      && (message?.role === "user" || message?.role === "assistant")
+      && Number.isSafeInteger(message?.sourceMessageId)
+      && Number.isSafeInteger(message?.sourceSequence)
+      && typeof message?.body === "string"
+      && message.body.length > 0
+      && /^[0-9a-f]{64}$/.test(message?.contentSha256 ?? "")
+      && Number.isFinite(Date.parse(message?.sourceTimestamp ?? ""));
+    if (!validMessage) {
+      return failure(400, "PROJECTION_IDENTITY_MISMATCH", "Projection message does not match its verified binding.");
+    }
+  }
+
+  const result = await store.applyProjection({ ownerId: auth.ownerId, target, messages });
+  return success({ ok: true, ...result });
 }
 
 export async function handleRenewLease({ auth, body, store, now = () => new Date().toISOString(), leaseTtlMs = 300_000 }) {
@@ -111,81 +227,31 @@ export async function handleReport({ auth, body, store, now = () => new Date().t
   if (!eventId || !workItemId) return failure(400, "INVALID_REQUEST", "id and workItemId are required.");
   if (!REPORT_TYPES.has(type)) return failure(400, "UNSUPPORTED_EVENT", `A connector may not report '${type}'.`);
 
-  const work = await store.loadWorkItem({ ownerId: auth.ownerId, workItemId });
-  // Scoped by owner, so a valid token for another account yields "not found"
-  // rather than someone else's work item.
-  if (!work) return failure(404, "WORK_ITEM_NOT_FOUND", "No such work item for this connector.");
-
-  // Record first. The unique (work_item_id, event_id) constraint is what makes
-  // a redelivered report a no-op instead of a second transition.
-  const { duplicate } = await store.recordEvent({
-    ownerId: auth.ownerId,
-    workItemId,
-    eventId,
-    eventType: type,
-    payload: body,
-    at: now(),
-  });
-  if (duplicate) return success({ ok: true, duplicate: true, status: work.status });
-
-  let next;
   try {
-    next = applyWorkEvent(work, {
-      id: eventId,
+    const result = await store.applyReportAtomically({
+      ownerId: auth.ownerId,
+      connectorNodeId: auth.connectorNodeId,
+      workItemId,
+      eventId,
       type,
+      attempt: body?.attempt,
+      turnIdempotencyKey: body?.turnIdempotencyKey ?? null,
+      summary: String(body?.summary ?? ""),
+      detail: String(body?.detail ?? ""),
+      error: body?.error ?? null,
+      reason: body?.reason ?? null,
+      evidence: Array.isArray(body?.evidence) ? body.evidence : [],
+      payload: body,
       at: now(),
-      error: body?.error,
-      reason: body?.reason,
-      resultId: body?.resultId ?? null,
     });
+    return success({ ok: true, duplicate: Boolean(result.duplicate), status: result.status });
   } catch (error) {
-    if (error instanceof WorkLifecycleError) {
+    if (error?.code === "WORK_ITEM_NOT_FOUND") return failure(404, error.code, "No such work item for this connector.");
+    if (["INVALID_TRANSITION", "MISSING_REASON", "REPORT_IDENTITY_MISMATCH"].includes(error?.code)) {
       return failure(409, error.code, error.message);
     }
     throw error;
   }
-
-  if (type === "succeed") {
-    const result = await store.insertResult({
-      ownerId: auth.ownerId,
-      workItemId,
-      summary: String(body?.summary ?? ""),
-      detail: String(body?.detail ?? ""),
-      at: now(),
-    });
-    next = { ...next, resultId: result.id };
-    const evidence = Array.isArray(body?.evidence) ? body.evidence : [];
-    if (evidence.length) {
-      await store.insertEvidence({
-        ownerId: auth.ownerId,
-        workItemId,
-        // Recorded on the evidence itself so a stored artifact always says which
-        // physical profile produced it, not only which role slot owns it.
-        executionProfileId: toExecutionProfileId(work.profileId),
-        evidence,
-        at: now(),
-      });
-    }
-  }
-
-  // A chat turn is only answered once its command succeeds, and the reply goes
-  // back into the conversation that asked. The write is keyed on the work item,
-  // so a redelivered success cannot post a second answer.
-  if (type === "succeed" && work.kind === "chat") {
-    await store.insertAssistantMessage({
-      ownerId: auth.ownerId,
-      workItemId,
-      body: String(body?.summary ?? ""),
-      at: now(),
-    });
-  }
-
-  if (["succeed", "fail", "release"].includes(type)) {
-    await store.releaseLease({ ownerId: auth.ownerId, workItemId, reason: type, at: now() });
-  }
-
-  await store.saveWorkItem({ ownerId: auth.ownerId, work: next });
-  return success({ ok: true, duplicate: false, status: next.status });
 }
 
 /**
