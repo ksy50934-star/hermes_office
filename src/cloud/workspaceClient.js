@@ -460,6 +460,16 @@ export async function loadMeetings() {
   }));
 }
 
+export async function startMeetingWithReadback(input, dependencies = {}) {
+  const start = dependencies.start ?? startMeeting;
+  const load = dependencies.load ?? loadMeetings;
+  const meetingId = await start(input);
+  const meetings = await load();
+  const meeting = meetings.find((item) => item.id === meetingId);
+  if (!meeting) throw new Error("회의는 생성됐지만 생성 결과를 다시 확인하지 못했습니다.");
+  return { meetingId, meeting, meetings };
+}
+
 export async function loadConversationArchive() {
   const supabase = client();
   const [conversations, messages] = await Promise.all([

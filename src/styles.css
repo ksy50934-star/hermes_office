@@ -7665,6 +7665,17 @@ body,
   min-height: 46px;
 }
 
+.meeting-start-error {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(176, 62, 62, 0.28);
+  border-radius: 10px;
+  background: rgba(176, 62, 62, 0.08);
+  color: #8a2f2f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .meeting-lobby-participants {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

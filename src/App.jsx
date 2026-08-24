@@ -14,7 +14,7 @@ import { createCloudSystemAdapter } from "./bibi/systemAdapter.js";
 import { createCloudTeamAdapter } from "./bibi/teamAdapter.js";
 import {
   saveOrganizationState as saveCloudOrganization,
-  startMeeting as startBibiMeeting,
+  startMeetingWithReadback as startBibiMeeting,
   transitionWork as transitionBibiWork,
 } from "./cloud/workspaceClient.js";
 import CommandCenter from "./CommandCenter.jsx";
@@ -251,7 +251,7 @@ function PageIntro({ eyebrow, title, description, children }) {
   );
 }
 
-function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMeeting, onOpenOffice }) {
+function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMeeting, onOpenOffice, startError = "" }) {
   const meetingProfiles = useMemo(() => {
     return profiles.length
       ? profiles
@@ -260,6 +260,7 @@ function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMee
   const [topic, setTopic] = useState("이번 주 핵심 업무와 병목 점검");
   const [selected, setSelected] = useState(() => new Set(profiles.slice(0, 2).map((profile) => profile.name)));
   const [selectedArchiveId, setSelectedArchiveId] = useState("");
+  const [starting, setStarting] = useState(false);
   const archivedMeetings = useMemo(
     () => loadLocalState("hermes-office-meetings", []).filter((meeting) => meeting.status === "complete"),
     [],
@@ -277,18 +278,23 @@ function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMee
     });
   };
 
-  const start = () => {
+  const start = async () => {
     const participants = selectedProfiles.map((profile) => profile.name);
-    if (!topic.trim() || !participants.length) return;
-    onStartMeeting({
-      id: crypto.randomUUID(),
-      source: "meeting-tab",
-      topic: topic.trim(),
-      subtitle: `${participants.length}명 참여 · 회의실 탭에서 시작`,
-      participants,
-      requestedBy: participants.includes("default") ? "default" : participants[0],
-      startedAt: Date.now(),
-    });
+    if (!topic.trim() || !participants.length || starting) return;
+    setStarting(true);
+    try {
+      await onStartMeeting({
+        id: crypto.randomUUID(),
+        source: "meeting-tab",
+        topic: topic.trim(),
+        subtitle: `${participants.length}명 참여 · 회의실 탭에서 시작`,
+        participants,
+        requestedBy: participants.includes("default") ? "default" : participants[0],
+        startedAt: Date.now(),
+      });
+    } finally {
+      setStarting(false);
+    }
   };
 
   return (
@@ -324,9 +330,10 @@ function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMee
             <article><small>진행 방식</small><strong>순차 발언</strong></article>
             <article><small>결과물</small><strong>회의록 + 업무</strong></article>
           </div>
-          <button className="primary-button meeting-lobby-start" type="button" disabled={!topic.trim() || !selectedProfiles.length} onClick={start}>
-            회의 시작
+          <button className="primary-button meeting-lobby-start" type="button" disabled={starting || !topic.trim() || !selectedProfiles.length} onClick={start} aria-busy={starting}>
+            {starting ? "회의 여는 중…" : "회의 시작"}
           </button>
+          {startError && <p className="meeting-start-error" role="alert">{startError}</p>}
         </section>
         <section className="meeting-lobby-participants">
           <div className="panel-heading">
@@ -1435,6 +1442,7 @@ function OfficeApp() {
   const organizationSeedStartedRef = useRef(false);
   const cloudOrganizationSeedStartedRef = useRef(false);
   const [error, setError] = useState("");
+  const [meetingStartError, setMeetingStartError] = useState("");
   const [selectedRoom, setSelectedRoom] = useState("");
   const [selectedRoomContext, setSelectedRoomContext] = useState(null);
   const [selectedSession, setSelectedSession] = useState("");
@@ -1978,13 +1986,19 @@ function OfficeApp() {
 
   const startMeeting = useCallback(async (meeting) => {
     if (bibiCloudView) {
+      setMeetingStartError("");
       try {
-        const meetingId = await startBibiMeeting({ topic: meeting.topic, profileIds: meeting.participants });
-        if (meetingId) setSelectedMeetingId(meetingId);
-        setError("");
+        const { meetingId, meetings } = await startBibiMeeting({ topic: meeting.topic, profileIds: meeting.participants });
+        setBibiCloudSnapshot((current) => ({
+          ...current,
+          meetings,
+          revision: Number(current?.revision ?? 0) + 1,
+        }));
+        setSelectedMeetingId(meetingId);
+        setMeetingStartError("");
         navigate("meeting");
       } catch (meetingError) {
-        setError(meetingError.message);
+        setMeetingStartError(meetingError.message || "회의를 시작하지 못했습니다.");
       }
       return;
     }
@@ -2399,6 +2413,7 @@ function OfficeApp() {
             activeMeetings={effectiveMeetings}
             onOpenMeeting={setSelectedMeetingId}
             onStartMeeting={startMeeting}
+            startError={meetingStartError}
             onOpenOffice={() => openRoom("meeting")}
           />
         )}
