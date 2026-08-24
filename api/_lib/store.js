@@ -57,8 +57,8 @@ export function createWorkspaceStore(supabase) {
       );
     },
 
-    async upsertRuntimeProjection({ ownerId, connectorNodeId, profileId, inventory, health, collectedAt }) {
-      const [inventoryRows, healthRows] = await Promise.all([
+    async upsertRuntimeProjection({ ownerId, connectorNodeId, profileId, inventory, health, documentTree, collectedAt }) {
+      const [inventoryRows, healthRows, documentRows] = await Promise.all([
         supabase.from("bibi_plugin_inventory").upsert({
           owner_id: ownerId,
           node_id: connectorNodeId,
@@ -85,9 +85,19 @@ export function createWorkspaceStore(supabase) {
           collected_at: collectedAt,
           updated_at: collectedAt,
         }, { onConflict: "owner_id,profile_id" }).select("profile_id"),
+        supabase.from("bibi_document_trees").upsert({
+          owner_id: ownerId,
+          node_id: connectorNodeId,
+          profile_id: profileId,
+          directories: documentTree.directories,
+          collection_error: documentTree.collectionError,
+          collected_at: collectedAt,
+          updated_at: collectedAt,
+        }, { onConflict: "owner_id,profile_id" }).select("profile_id"),
       ]);
       unwrap(inventoryRows, "upsertRuntimeProjection.inventory");
       unwrap(healthRows, "upsertRuntimeProjection.health");
+      unwrap(documentRows, "upsertRuntimeProjection.documents");
     },
 
     async listProjectionTargets({ ownerId }) {

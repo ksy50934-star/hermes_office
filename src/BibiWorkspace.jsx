@@ -61,6 +61,7 @@ import {
   loadConversationArchive,
   loadConversations,
   loadDataRoomArtifacts,
+  loadDocumentTrees,
   loadMeetings,
   loadMessages,
   loadOrganizationState,
@@ -728,6 +729,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   const [archive, setArchive] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [artifacts, setArtifacts] = useState([]);
+  const [documentTrees, setDocumentTrees] = useState([]);
   const [organizationState, setOrganizationState] = useState({ revision: 0, nodes: [], audit: [] });
   const [runtimeProjection, setRuntimeProjection] = useState({ inventory: [], health: [] });
   const [openWorkId, setOpenWorkId] = useState(null);
@@ -802,17 +804,18 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   // ---- workspace snapshot --------------------------------------------------
   const loadSnapshot = useCallback(async () => {
     if (!cloud.configured || !ownerId) return null;
-    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, organizationRows, runtimeRows] = await Promise.all([
+    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, documentTreeRows, organizationRows, runtimeRows] = await Promise.all([
       loadRoster(),
       loadConnectorState(),
       loadWorkItems(),
       loadConversationArchive(),
       loadMeetings(),
       loadDataRoomArtifacts(),
+      loadDocumentTrees(),
       loadOrganizationState(ownerId),
       loadRuntimeProjection(),
     ]);
-    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, organizationRows, runtimeRows };
+    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, documentTreeRows, organizationRows, runtimeRows };
   }, [cloud.configured, ownerId]);
 
   const applySnapshot = useCallback((snapshot) => {
@@ -825,6 +828,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     setArchive(snapshot.archiveRows);
     setMeetings(snapshot.meetingRows);
     setArtifacts(snapshot.artifactRows);
+    setDocumentTrees(snapshot.documentTreeRows);
     setOrganizationState(snapshot.organizationRows);
     setRuntimeProjection(snapshot.runtimeRows);
     setError("");
@@ -917,6 +921,11 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
           ...current,
           health: [row, ...current.health.filter((item) => item.profile_id !== row.profile_id)],
         }));
+        setCloudRevision((current) => current + 1);
+      },
+      onDocumentTree: (row) => {
+        if (!row?.profile_id) return;
+        setDocumentTrees((current) => [row, ...current.filter((item) => item.profile_id !== row.profile_id)]);
         setCloudRevision((current) => current + 1);
       },
       // Realtime replays nothing that happened while the socket was down, so a
@@ -1032,11 +1041,12 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       archive,
       meetings,
       artifacts,
+      documentTrees,
       organization: organizationState,
       runtime: runtimeProjection,
       revision: cloudRevision,
     });
-  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, organizationState, runtimeProjection, cloudRevision]);
+  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, documentTrees, organizationState, runtimeProjection, cloudRevision]);
 
   // ---- auth transition -----------------------------------------------------
   // Every screen before this one is a short card and this one is a long

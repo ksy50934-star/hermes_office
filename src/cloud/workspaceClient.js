@@ -163,6 +163,15 @@ export async function loadConnectorState() {
   };
 }
 
+export async function loadDocumentTrees() {
+  return unwrap(
+    await client().from("bibi_document_trees")
+      .select("profile_id, directories, collection_error, collected_at, updated_at")
+      .order("profile_id"),
+    "loadDocumentTrees",
+  );
+}
+
 export async function loadRuntimeProjection() {
   const [inventoryResult, healthResult] = await Promise.all([
     client().from("bibi_plugin_inventory")
@@ -547,7 +556,7 @@ export async function loadDataRoomArtifacts() {
  * was missed while the tab was asleep, so the caller must refetch rather than
  * assume its cache is still current.
  */
-export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onOrganization, onPluginInventory, onRuntimeHealth, onResync } = {}) {
+export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onOrganization, onPluginInventory, onRuntimeHealth, onDocumentTree, onResync } = {}) {
   if (!supabase) return () => {};
 
   let disposed = false;
@@ -577,6 +586,7 @@ export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent,
     bind("bibi_organization_states", onOrganization);
     bind("bibi_plugin_inventory", onPluginInventory);
     bind("bibi_runtime_health", onRuntimeHealth);
+    bind("bibi_document_trees", onDocumentTree);
   };
 
   (async () => {

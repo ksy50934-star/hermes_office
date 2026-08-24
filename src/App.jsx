@@ -1502,9 +1502,11 @@ function OfficeApp() {
   const bibiDataRoomAdapter = useMemo(
     () => bibiCloudSnapshot?.ownerId ? createCloudDataRoomAdapter({
       artifacts: bibiCloudSnapshot.artifacts ?? [],
+      documentTrees: bibiCloudSnapshot.documentTrees ?? [],
+      profileIds: (bibiCloudSnapshot.roster ?? []).map((profile) => profile.id),
       connector: bibiCloudSnapshot.connector ?? null,
     }) : null,
-    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.artifacts, bibiCloudSnapshot?.connector],
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.artifacts, bibiCloudSnapshot?.documentTrees, bibiCloudSnapshot?.roster, bibiCloudSnapshot?.connector],
   );
   const bibiPluginAdapter = useMemo(
     () => bibiCloudSnapshot?.ownerId ? createCloudPluginAdapter({ runtime: bibiCloudSnapshot.runtime }) : null,

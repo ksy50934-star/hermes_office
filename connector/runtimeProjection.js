@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 
 import { EXECUTION_PROFILE_IDS } from "../src/bibi/roster.js";
+import { collectDocumentTree } from "./documentTreeProjection.js";
 import { redactSecrets } from "./evidence.js";
 import { homeForExecutionProfile } from "./hermesCliExecutor.js";
 
@@ -102,7 +103,7 @@ function createRunner(config, execFileImpl) {
   });
 }
 
-export function createRuntimeProjectionCollector(config, { execFileImpl = execFile } = {}) {
+export function createRuntimeProjectionCollector(config, { execFileImpl = execFile, documentTreeCollector = collectDocumentTree } = {}) {
   const run = createRunner(config, execFileImpl);
   return {
     async collect(executionProfileId) {
@@ -122,8 +123,15 @@ export function createRuntimeProjectionCollector(config, { execFileImpl = execFi
       ]);
       const toolsets = parseToolsets(toolText);
       const status = parseRuntimeStatus(`${versionText}\n${statusText}`);
+      const profileId = organizationProfileId(executionProfileId);
+      let documentTree;
+      try {
+        documentTree = await documentTreeCollector({ root: config.bibiWorldRoot, profileId });
+      } catch {
+        documentTree = { directories: [], collectionError: "collection-failed" };
+      }
       return {
-        profileId: organizationProfileId(executionProfileId),
+        profileId,
         executionProfileId,
         collectedAt,
         inventory: {
@@ -132,6 +140,7 @@ export function createRuntimeProjectionCollector(config, { execFileImpl = execFi
           toolsets,
           errors,
         },
+        documentTree,
         health: {
           ...status,
           enabledToolsets: toolsets.filter((item) => item.enabled).length,

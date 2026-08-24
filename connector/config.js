@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 /**
  * Local Mac connector configuration.
  *
@@ -141,6 +144,7 @@ export function loadConnectorConfig(env = process.env) {
     hermesBin,
     hermesDefaultHome,
     hermesProfilesRoot,
+    bibiWorldRoot: text(env, "BIBI_WORLD_ROOT", path.join(text(env, "HOME", os.homedir()), "Documents", "bibi-world")),
     hermesMaxTurns: positiveInteger(env, "BIBI_HERMES_MAX_TURNS", DEFAULT_HERMES_MAX_TURNS),
     hermesTimeoutMs: positiveInteger(env, "BIBI_HERMES_TIMEOUT_MS", DEFAULT_HERMES_TIMEOUT_MS),
     hermesMaxOutputBytes: positiveInteger(env, "BIBI_HERMES_MAX_OUTPUT_BYTES", DEFAULT_HERMES_MAX_OUTPUT_BYTES),

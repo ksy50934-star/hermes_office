@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { handleRuntimeProjection } from "../api/_lib/handlers.js";
 import {
+  createRuntimeProjectionCollector,
   createRuntimeProjectionRunner,
   organizationProfileId,
   parseMcpCatalog,
@@ -48,6 +49,23 @@ test("runtime projection parsers keep only public tool and health facts", () => 
   assert.equal(organizationProfileId("bibi-18"), "bibi-18");
 });
 
+test("runtime projection envelope includes the safe bibi-world directory tree", async () => {
+  const collector = createRuntimeProjectionCollector({
+    hermesBin: "/bin/hermes",
+    hermesTimeoutMs: 30_000,
+    hermesMaxOutputBytes: 1_000_000,
+    hermesDefaultHome: "/tmp/hermes",
+    hermesProfilesRoot: "/tmp/profiles",
+    bibiWorldRoot: "/tmp/bibi-world",
+  }, {
+    execFileImpl: (_bin, _args, _options, callback) => callback(null, "", ""),
+    documentTreeCollector: async ({ root, profileId }) => ({ directories: [`information/${profileId}`], collectionError: null, root }),
+  });
+  const payload = await collector.collect("bibi-02");
+  assert.deepEqual(payload.documentTree.directories, ["information/bibi-02"]);
+  assert.equal(payload.profileId, "bibi-02");
+});
+
 test("runtime projection runner uploads once per interval and retries on the next interval", async () => {
   let clock = 1_000_000;
   const uploaded = [];
@@ -79,11 +97,17 @@ test("runtime projection API rejects cross-profile identity and persists only bo
       errors: [],
     },
     health: { hermesVersion: "0.20.0", model: "gpt-5.6-sol", provider: "OpenAI Codex", gatewayStatus: "running", activeSessions: 1, enabledToolsets: 1, disabledToolsets: 0 },
+    documentTree: {
+      directories: ["information", "information/approved", "../outside", ".omc/state", "/absolute"],
+      collectionError: null,
+    },
   };
   const result = await handleRuntimeProjection({ auth: { ownerId: "owner-1", connectorNodeId: "node-1" }, body, store });
   assert.equal(result.status, 200);
   assert.equal(calls.length, 1);
   assert.equal("secret" in calls[0].inventory.catalog[0], false);
+  assert.deepEqual(calls[0].documentTree.directories, ["information", "information/approved"]);
+  assert.equal(calls[0].documentTree.collectionError, null);
 
   const refused = await handleRuntimeProjection({
     auth: { ownerId: "owner-1", connectorNodeId: "node-1" },

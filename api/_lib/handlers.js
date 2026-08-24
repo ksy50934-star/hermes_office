@@ -56,6 +56,16 @@ function boundedList(value, max) {
   return Array.isArray(value) ? value.slice(0, max) : [];
 }
 
+function boundedDocumentDirectories(value) {
+  return boundedList(value, 2000).flatMap((entry) => {
+    const directory = boundedText(entry, 500).replace(/\\/g, "/");
+    const parts = directory.split("/");
+    if (!directory || directory.startsWith("/") || parts.length > 12
+      || parts.some((part) => !part || part === "." || part === ".." || part.startsWith("."))) return [];
+    return [directory];
+  });
+}
+
 export async function handleRuntimeProjection({ auth, body, store }) {
   const profileId = body?.profileId;
   const executionProfileId = body?.executionProfileId;
@@ -102,12 +112,18 @@ export async function handleRuntimeProjection({ auth, body, store }) {
     error: boundedText(body?.health?.error, 500) || null,
   };
 
+  const documentTree = {
+    directories: boundedDocumentDirectories(body?.documentTree?.directories),
+    collectionError: boundedText(body?.documentTree?.collectionError, 120) || null,
+  };
+
   await store.upsertRuntimeProjection({
     ownerId: auth.ownerId,
     connectorNodeId: auth.connectorNodeId,
     profileId,
     inventory,
     health,
+    documentTree,
     collectedAt,
   });
   return success({ ok: true, profileId, collectedAt });

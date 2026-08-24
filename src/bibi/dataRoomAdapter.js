@@ -61,8 +61,39 @@ function itemFor(row, rootId) {
   };
 }
 
-export function createCloudDataRoomAdapter({ artifacts = [], connector = null } = {}) {
+function directoryItem(profileId, directory) {
+  const name = directory.split("/").at(-1);
+  return {
+    id: `profiles:directory:${profileId}/${directory}`,
+    type: "folder",
+    rootId: "profiles",
+    relativePath: `${profileId}/${directory}`,
+    name,
+    kind: "folder",
+    category: "documents",
+    size: 0,
+    modified: 0,
+  };
+}
+
+function directDirectories(tree, relativePath = "") {
+  return (tree?.directories ?? [])
+    .filter((directory) => {
+      const index = directory.lastIndexOf("/");
+      const parent = index < 0 ? "" : directory.slice(0, index);
+      return parent === relativePath;
+    })
+    .map((directory) => directoryItem(tree.profile_id, directory));
+}
+
+export function createCloudDataRoomAdapter({ artifacts = [], connector = null, profileIds = [], documentTrees = [] } = {}) {
   const rows = artifactRows(artifacts);
+  const treeByProfile = new Map(documentTrees.map((tree) => [tree.profile_id, tree]));
+  const allProfileIds = [...new Set([
+    ...profileIds,
+    ...documentTrees.map((tree) => tree.profile_id),
+    ...rows.map((row) => row.profileId),
+  ].filter(Boolean))].sort();
   const byEntity = new Map(rows.map((row) => [`${row.entityType}:${row.entityId}`, row]));
   const rootRows = (rootId) => {
     if (rootId === "workspace") return rows.filter((row) => row.entityType === "result");
@@ -109,10 +140,9 @@ export function createCloudDataRoomAdapter({ artifacts = [], connector = null } 
         const rootId = String(params.root ?? "profiles");
         const relativePath = String(params.path ?? "");
         if (rootId === "profiles" && !relativePath) {
-          const profiles = [...new Set(rows.map((row) => row.profileId).filter(Boolean))].sort();
           return {
             roots: roots(), root: roots().find((root) => root.id === rootId), path: [], relativePath,
-            items: profiles.map((profileId) => ({
+            items: allProfileIds.map((profileId) => ({
               id: `profiles:folder:${profileId}`,
               type: "folder",
               name: profileId,
@@ -120,7 +150,18 @@ export function createCloudDataRoomAdapter({ artifacts = [], connector = null } 
             })),
           };
         }
-        const matches = rootRows(rootId).filter((row) => rootId !== "profiles" || row.profileId === relativePath);
+        if (rootId === "profiles") {
+          const [profileId, ...parts] = relativePath.split("/").filter(Boolean);
+          const profileRelativePath = parts.join("/");
+          const folders = directDirectories(treeByProfile.get(profileId), profileRelativePath);
+          const files = profileRelativePath ? [] : rows.filter((row) => row.profileId === profileId).map((row) => itemFor(row, rootId));
+          return {
+            roots: roots(), root: roots().find((root) => root.id === rootId),
+            path: relativePath.split("/").filter(Boolean), relativePath,
+            items: [...folders, ...files],
+          };
+        }
+        const matches = rootRows(rootId);
         return {
           roots: roots(), root: roots().find((root) => root.id === rootId),
           path: relativePath ? [relativePath] : [], relativePath,
