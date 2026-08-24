@@ -4,16 +4,18 @@ import { readFile } from "node:fs/promises";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("all organization-bearing workspace routes use authenticated Bibi cloud surfaces", async () => {
+test("owner-data routes keep specialist renderers behind the authenticated cloud controller", async () => {
   const [surface, app] = await Promise.all([read("src/bibi/surface.js"), read("src/App.jsx")]);
   for (const view of ["ceo", "office", "chat", "meeting", "kanban", "command", "data", "sessions", "team"]) {
     assert.match(surface, new RegExp(`\\b${view}\\b`), `${view} must be a Bibi surface`);
   }
   assert.match(app, /<BibiWorkspace\s+surface=\{view\}/);
-  assert.match(app, /\{!bibiSurface && view === "meeting"/);
-  assert.match(app, /\{!bibiSurface && view === "data"/);
-  assert.match(app, /\{!bibiSurface && \(\s*<section[\s\S]*?persistent-chat-runtime/);
-  assert.match(app, /useEffect\(\(\) => \{\s*if \(bibiSurface\) return undefined;\s*const initialLoad = window\.setTimeout\(refresh, 0\)/);
+  assert.match(app, /controllerOnly=\{!bibiSurface\}/);
+  assert.match(app, /view === "office"[\s\S]*?<HermesOffice/);
+  assert.match(app, /view === "meeting"[\s\S]*?<MeetingLobby/);
+  assert.match(app, /view === "data"[\s\S]*?<BibiDataRoom/);
+  assert.match(app, /view === "chat"[\s\S]*?<BibiDirectChat/);
+  assert.match(app, /if \(bibiCloudView\) return undefined;/);
 });
 
 test("meeting and data room contracts are durable, owner scoped, and provenance preserving", async () => {

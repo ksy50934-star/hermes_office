@@ -11,16 +11,23 @@
 export const BIBI_VIEW_ID = "ceo";
 
 /**
- * Every view that displays organisation, conversations, work or artifacts uses
- * the authenticated cloud contract. Legacy Hermes Office remains available only
- * for low-level system/plugin/terminal tooling; it never supplies Bibi data.
+ * The CEO landing is the only view whose renderer is BibiWorkspace itself.
+ * Other Bibi views keep the upstream specialist renderer and replace only its
+ * data transport with the authenticated cloud contract.
  */
-export const BIBI_SURFACE_IDS = Object.freeze(new Set([
+export const BIBI_SURFACE_IDS = Object.freeze(new Set([BIBI_VIEW_ID]));
+
+/** Views protected by the Bibi owner session and backed by Bibi cloud data. */
+export const BIBI_CLOUD_VIEW_IDS = Object.freeze(new Set([
   "ceo", "office", "chat", "meeting", "kanban", "command", "data", "sessions", "team",
 ]));
 
 export function isBibiSurface(view) {
   return BIBI_SURFACE_IDS.has(view);
+}
+
+export function isBibiCloudView(view) {
+  return BIBI_CLOUD_VIEW_IDS.has(view);
 }
 
 /**
@@ -48,5 +55,5 @@ export const AUTH_GATE = Object.freeze({
  * would flash a full navigation bar at someone who has not authenticated.
  */
 export function isAuthLocked(view, gate) {
-  return isBibiSurface(view) && gate !== AUTH_GATE.OPEN;
+  return isBibiCloudView(view) && gate !== AUTH_GATE.OPEN;
 }

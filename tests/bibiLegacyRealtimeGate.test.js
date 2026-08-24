@@ -177,7 +177,8 @@ test("the gate is wired from the active view down to the chat runtime", async ()
 
   // App owns the answer to "is the Bibi surface active", and hands it down.
   assert.match(app, /const bibiSurface = isBibiSurface\(view\);/);
-  assert.match(app, /legacyRealtime=\{!bibiSurface\}/);
+  assert.match(app, /specialistSurfaceReady && !bibiCloudView/);
+  assert.match(app, /legacyRealtime\s*\/>/);
 
   // ProfileChat keeps the effect unconditional and gates the request inside it.
   assert.match(profileChat, /import \{ startLegacyRealtime \} from "\.\/legacyRealtime\.js";/);
@@ -194,7 +195,8 @@ test("the gate is wired from the active view down to the chat runtime", async ()
 test("legacy gateway consumers are not mounted behind any Bibi owner-data view", async () => {
   const app = await read("src/App.jsx");
 
-  assert.match(app, /\{!bibiSurface && view === "meeting" && activeMeetings\.length > 0 && \(/);
+  assert.match(app, /\{specialistSurfaceReady && view === "meeting" && effectiveMeetings\.length > 0 && \(/);
   assert.match(app, /\{view === "terminal" && \(/);
-  assert.match(app, /\{!bibiSurface && \(\s*<section[\s\S]*?persistent-chat-runtime/);
+  assert.match(app, /\{specialistSurfaceReady && !bibiCloudView && \(\s*<section[\s\S]*?persistent-chat-runtime/);
+  assert.match(app, /\{specialistSurfaceReady && bibiCloudView && view === "chat"/);
 });

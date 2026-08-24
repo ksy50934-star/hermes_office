@@ -123,7 +123,7 @@ test("B1 organization console separates live operations from staged structure ed
   assert.doesNotMatch(workspaceSource, /department\.label\.slice\(0, 1\)/);
   assert.doesNotMatch(workspaceSource, /member\.initials/);
   assert.match(appSource, /roomAssignments={roomAssignments}/);
-  assert.match(appSource, /missions={missions}/);
+  assert.match(appSource, /missions={effectiveMissions}/);
   assert.match(appSource, /onOpenOffice={\(\) => navigate\("office"\)}/);
   assert.match(appSource, /onSaveOrganization={saveOrganizationStructure}/);
   assert.match(appSource, /const normalizedNodes = validateOrganizationNodes\(state\?\.nodes \?\? \[\]\)/);

@@ -1,6 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BibiWorkspace from "./BibiWorkspace.jsx";
-import { AUTH_GATE, isAuthLocked, isBibiSurface } from "./bibi/surface.js";
+import BibiDirectChat from "./BibiDirectChat.jsx";
+import BibiCloudMeetingConsole from "./BibiCloudMeetingConsole.jsx";
+import BibiDataRoom from "./BibiDataRoom.jsx";
+import { AUTH_GATE, isAuthLocked, isBibiCloudView, isBibiSurface } from "./bibi/surface.js";
+import { cloudOfficeState } from "./bibi/cloudLegacyAdapter.js";
+import { createBibiKanbanAdapter } from "./bibi/kanbanAdapter.js";
+import { startMeeting as startBibiMeeting, transitionWork as transitionBibiWork } from "./cloud/workspaceClient.js";
 import CommandCenter from "./CommandCenter.jsx";
 import DataRoom from "./DataRoom.jsx";
 import HermesOffice from "./HermesOffice.jsx";
@@ -242,7 +248,7 @@ function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMee
       : Object.keys(TEAM_META).map((name) => ({ name, gateway_running: false }));
   }, [profiles]);
   const [topic, setTopic] = useState("이번 주 핵심 업무와 병목 점검");
-  const [selected, setSelected] = useState(() => new Set(["default", "hermes-operations"]));
+  const [selected, setSelected] = useState(() => new Set(profiles.slice(0, 2).map((profile) => profile.name)));
   const [selectedArchiveId, setSelectedArchiveId] = useState("");
   const archivedMeetings = useMemo(
     () => loadLocalState("hermes-office-meetings", []).filter((meeting) => meeting.status === "complete"),
@@ -250,6 +256,7 @@ function MeetingLobby({ profiles, activeMeetings = [], onOpenMeeting, onStartMee
   );
   const selectedArchive = archivedMeetings.find((meeting) => meeting.id === selectedArchiveId);
   const selectedProfiles = meetingProfiles.filter((profile) => selected.has(profile.name));
+
 
   const toggleParticipant = (name) => {
     setSelected((current) => {
@@ -1390,6 +1397,7 @@ function BrandLockup() {
 function OfficeApp() {
   const [view, setView] = useState(initialViewFromUrl);
   const [bibiAuthGate, setBibiAuthGate] = useState(AUTH_GATE.LOCKED);
+  const [bibiCloudSnapshot, setBibiCloudSnapshot] = useState(null);
   const [workspace, setWorkspace] = useState(() => loadCachedWorkspace());
   const [organization, setOrganization] = useState({ version: 1, revision: 0, nodes: [], audit: [] });
   const [organizationStatus, setOrganizationStatus] = useState("loading");
@@ -1408,7 +1416,7 @@ function OfficeApp() {
   const [selectedMeetingId, setSelectedMeetingId] = useState(() => loadActiveMeetings()[0]?.id ?? "");
   const [meetingCloseRequests, setMeetingCloseRequests] = useState({});
   const [meetingClock, setMeetingClock] = useState(Date.now);
-  const activeMeeting = activeMeetings.find((meeting) => meeting.id === selectedMeetingId) ?? null;
+
   const [agentActivities, setAgentActivities] = useState({});
   const [connection, setConnection] = useState("connecting");
   const [mobileNav, setMobileNav] = useState(false);
@@ -1422,14 +1430,33 @@ function OfficeApp() {
   const [localNotification, setLocalNotification] = useState(null);
   const notificationTimerRef = useRef(0);
   const bibiSurface = isBibiSurface(view);
+  const bibiCloudView = isBibiCloudView(view);
+  const bibiOffice = useMemo(() => cloudOfficeState(bibiCloudSnapshot ?? {}), [bibiCloudSnapshot]);
+  const cloudRuntimeMeetings = useMemo(() => (bibiCloudSnapshot?.meetings ?? []).map((meeting) => ({
+    id: meeting.id,
+    topic: meeting.topic,
+    status: meeting.status === "complete" ? "complete" : "discussion",
+    participants: meeting.participants.map((item) => item.profile_id),
+    participantRows: meeting.participants,
+    startedAt: Date.parse(meeting.created_at || 0),
+    completedAt: meeting.completed_at ? Date.parse(meeting.completed_at) : undefined,
+  })), [bibiCloudSnapshot?.meetings]);
+  const effectiveMeetings = bibiCloudView ? cloudRuntimeMeetings : activeMeetings;
+  const effectiveActiveMeeting = effectiveMeetings.find((meeting) => meeting.id === selectedMeetingId) ?? null;
+  const bibiKanbanAdapter = useMemo(
+    () => bibiCloudSnapshot?.ownerId ? createBibiKanbanAdapter({ ownerId: bibiCloudSnapshot.ownerId }) : null,
+    [bibiCloudSnapshot],
+  );
+  const specialistSurfaceReady = !bibiSurface
+    && (!bibiCloudView || (bibiAuthGate === AUTH_GATE.OPEN && Boolean(bibiCloudSnapshot)));
 
   // The Bibi Workspace reports its own connector and cloud health, so a failing
   // legacy Hermes poll must not raise a banner over it. `refresh` is a stable
   // callback on a 30s timer, so it reads the active surface from a ref rather
   // than closing over `view` and resubscribing on every navigation.
-  const bibiSurfaceRef = useRef(isBibiSurface(view));
+  const bibiSurfaceRef = useRef(isBibiCloudView(view));
   useEffect(() => {
-    bibiSurfaceRef.current = isBibiSurface(view);
+    bibiSurfaceRef.current = isBibiCloudView(view);
   }, [view]);
 
   const refresh = useCallback(async () => {
@@ -1458,7 +1485,7 @@ function OfficeApp() {
   }, []);
 
   useEffect(() => {
-    if (bibiSurface) return undefined;
+    if (bibiCloudView) return undefined;
     const initialLoad = window.setTimeout(refresh, 0);
     const timer = window.setInterval(refresh, 30000);
     window.addEventListener("hermes:refresh-workspace", refresh);
@@ -1467,7 +1494,7 @@ function OfficeApp() {
       window.clearInterval(timer);
       window.removeEventListener("hermes:refresh-workspace", refresh);
     };
-  }, [refresh, bibiSurface]);
+  }, [refresh, bibiCloudView]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -1533,11 +1560,14 @@ function OfficeApp() {
     };
   }, [activeMeetings]);
 
+  const activeWorkspace = bibiCloudView ? bibiOffice.workspace : workspace;
+  const effectiveMissions = bibiCloudView ? bibiOffice.missions : missions;
+  const effectiveActivities = bibiCloudView ? bibiOffice.activities : agentActivities;
   const profiles = useMemo(
-    () => (workspace?.profiles ?? [])
+    () => (activeWorkspace?.profiles ?? [])
       .filter((profile) => profile?.name)
-      .map((profile) => withEffectiveProfileStatus(profile, agentActivities[profile.name], Boolean(workspace))),
-    [agentActivities, workspace],
+      .map((profile) => withEffectiveProfileStatus(profile, effectiveActivities[profile.name], Boolean(activeWorkspace))),
+    [activeWorkspace, effectiveActivities],
   );
   const roomAssignments = useMemo(
     () => organizationRoomAssignments(organization.nodes),
@@ -1612,14 +1642,16 @@ function OfficeApp() {
     }
   }, [organization.revision]);
   const workspaceForViews = useMemo(() => {
-    if (!workspace) return workspace;
+    if (!activeWorkspace) return activeWorkspace;
     const managed = new Map(profiles.map((profile) => [profile.name, profile]));
     return {
-      ...workspace,
-      profiles: (workspace.profiles ?? []).map((profile) => managed.get(profile.name) ?? profile),
+      ...activeWorkspace,
+      profiles: (activeWorkspace.profiles ?? []).map((profile) => managed.get(profile.name) ?? profile),
     };
-  }, [profiles, workspace]);
-  const systemHealthy = connection === "online" || Boolean(workspace);
+  }, [profiles, activeWorkspace]);
+  const systemHealthy = bibiCloudView
+    ? bibiCloudSnapshot?.connector?.health?.state === "online"
+    : connection === "online" || Boolean(workspace);
 
   const updateNotificationSettings = useCallback((patch) => {
     setNotificationSettings((current) => ({ ...current, ...patch }));
@@ -1834,7 +1866,18 @@ function OfficeApp() {
     }));
   }, []);
 
-  const startMeeting = useCallback((meeting) => {
+  const startMeeting = useCallback(async (meeting) => {
+    if (bibiCloudView) {
+      try {
+        const meetingId = await startBibiMeeting({ topic: meeting.topic, profileIds: meeting.participants });
+        if (meetingId) setSelectedMeetingId(meetingId);
+        setError("");
+        navigate("meeting");
+      } catch (meetingError) {
+        setError(meetingError.message);
+      }
+      return;
+    }
     const preparedMeeting = {
       ...meeting,
       id: meeting.id ?? crypto.randomUUID(),
@@ -1858,11 +1901,15 @@ function OfficeApp() {
       return next;
     });
     navigate("meeting");
-  }, [navigate]);
+  }, [bibiCloudView, navigate]);
 
   const toggleMissionStep = async (missionId, stepId) => {
-    const mission = missions.find((item) => item.id === missionId);
+    const mission = effectiveMissions.find((item) => item.id === missionId);
     if (!mission) return;
+    if (bibiCloudView) {
+      setError("Bibi Cloud 업무의 체크리스트는 실제 worker evidence에서 갱신됩니다.");
+      return;
+    }
     try {
       await patchOfficeTaskFromLatest(hermesFetch, missionId, {}, (latestTask) => ({
         ...(latestTask.metadata ?? {}),
@@ -1878,8 +1925,22 @@ function OfficeApp() {
   };
 
   const moveMission = async (missionId, status) => {
-    const mission = missions.find((item) => item.id === missionId);
+    const mission = effectiveMissions.find((item) => item.id === missionId);
     if (!mission) return;
+    if (bibiCloudView) {
+      try {
+        if (status === "done" || status === "approval") {
+          setError("완료·검토 상태는 실제 Hermes 실행 결과로만 전환됩니다.");
+          return;
+        }
+        if (mission.cloudStatus === "blocked") await transitionBibiWork({ workItemId: missionId, type: "unblock" });
+        await transitionBibiWork({ workItemId: missionId, type: "assign", profileId: mission.owner });
+        setError("Bibi Cloud 업무를 담당 profile에 재배정했습니다. connector가 실제 실행을 가져갑니다.");
+      } catch (taskError) {
+        setError(taskError.message);
+      }
+      return;
+    }
     try {
       const targetStatus = { queued: "todo", working: "running", approval: "review", done: "done" }[status] ?? status;
       const plan = officialKanbanMovePlan(targetStatus);
@@ -1902,6 +1963,16 @@ function OfficeApp() {
 
   const deleteMission = async (mission, reason) => {
     if (!mission?.id || !String(reason || "").trim()) return;
+    if (bibiCloudView) {
+      try {
+        await transitionBibiWork({ workItemId: mission.id, type: "cancel", reason: String(reason).trim() });
+        setError(`“${mission.title}” 실제 업무를 취소했습니다.`);
+      } catch (taskError) {
+        setError(taskError.message);
+        throw taskError;
+      }
+      return;
+    }
     try {
       await patchOfficeTaskFromLatest(hermesFetch, mission.id, { status: "archived" }, (latestTask) => ({
         ...(latestTask.metadata ?? {}),
@@ -1984,11 +2055,11 @@ function OfficeApp() {
     system: "시스템",
     terminal: "Hermes 운영 콘솔",
   }[view];
-  const activeChatProfiles = profiles.filter((profile) => ["working", "meeting", "approval"].includes(agentActivities[profile.name]?.state));
+  const activeChatProfiles = profiles.filter((profile) => ["working", "meeting", "approval"].includes(effectiveActivities[profile.name]?.state));
   const activeChatCount = activeChatProfiles.length;
   const primaryActiveChat = activeChatProfiles[0];
   const primaryActiveChatName = primaryActiveChat ? TEAM_META[primaryActiveChat.name]?.name ?? primaryActiveChat.name : "";
-  const primaryActiveChatText = primaryActiveChat ? agentActivities[primaryActiveChat.name]?.text || "작업 중" : "";
+  const primaryActiveChatText = primaryActiveChat ? effectiveActivities[primaryActiveChat.name]?.text || "작업 중" : "";
   const activeChatSummary = activeChatCount
     ? `${activeChatProfiles.map((profile) => TEAM_META[profile.name]?.name ?? profile.name).join(", ")} 작업 중`
     : "";
@@ -2090,10 +2161,10 @@ function OfficeApp() {
             {/* Gateway online count and the workspace refresh both describe the
                 legacy Hermes backend. The Bibi Workspace has its own connector
                 badge, so this chrome would only contradict it there. */}
-            {!bibiSurface && (
+            {!bibiCloudView && (
               <span className="topbar-signal"><i />{profiles.filter((profile) => profile.gateway_running).length}명 온라인</span>
             )}
-            {activeMeetings.length > 0 && <button className="meeting-jump" type="button" onClick={() => navigate("meeting")}>진행 중 회의 {activeMeetings.length}</button>}
+            {effectiveMeetings.length > 0 && <button className="meeting-jump" type="button" onClick={() => navigate("meeting")}>진행 중 회의 {effectiveMeetings.length}</button>}
             <span>
               {new Intl.DateTimeFormat("ko", {
                 month: "long",
@@ -2101,11 +2172,11 @@ function OfficeApp() {
                 weekday: "short",
               }).format(new Date())}
             </span>
-            {!bibiSurface && <button type="button" onClick={refresh}>새로고침</button>}
+            {!bibiCloudView && <button type="button" onClick={refresh}>새로고침</button>}
           </div>
         </header>
 
-        {error && !officeNotice && !bibiSurface && (
+        {error && !officeNotice && !bibiCloudView && (
           <div className={`error-banner ${error.includes("승인") || error.includes("보류") ? "notice" : ""}`}>
             <span>{error}</span>
             <button type="button" onClick={() => setError("")}>닫기</button>
@@ -2120,12 +2191,19 @@ function OfficeApp() {
           </div>
         )}
 
-        {bibiSurface && <BibiWorkspace surface={view} onAuthGateChange={setBibiAuthGate} />}
+        {bibiCloudView && (
+          <BibiWorkspace
+            surface={view}
+            controllerOnly={!bibiSurface}
+            onAuthGateChange={setBibiAuthGate}
+            onCloudSnapshot={setBibiCloudSnapshot}
+          />
+        )}
 
-        {!bibiSurface && view === "command" && (
+        {specialistSurfaceReady && view === "command" && (
           <CommandCenter
             workspace={workspaceForViews}
-            missions={missions}
+            missions={effectiveMissions}
             approvals={approvals}
             onToggleStep={toggleMissionStep}
             onApprovalDecision={decideApproval}
@@ -2137,10 +2215,10 @@ function OfficeApp() {
           />
         )}
 
-        {!bibiSurface && view === "office" && (
+        {specialistSurfaceReady && view === "office" && (
           <HermesOffice
             workspace={workspaceForViews}
-            missions={missions}
+            missions={effectiveMissions}
             approvals={approvals}
             focusedRoom={selectedRoom}
             focusedRoomContext={selectedRoomContext}
@@ -2148,21 +2226,21 @@ function OfficeApp() {
             onStartChat={startChat}
             onMoveMission={moveMission}
             onApprovalDecision={decideApproval}
-            agentActivities={agentActivities}
+            agentActivities={effectiveActivities}
             onActivityChange={updateAgentActivity}
             onStartMeeting={startMeeting}
             onOpenKanban={() => navigate("kanban")}
             onOpenData={() => navigate("data")}
             onGovernanceApprovalRequest={addGovernanceApproval}
-            hasActiveMeeting={activeMeetings.length > 0}
+            hasActiveMeeting={effectiveMeetings.length > 0}
             onOpenActiveMeeting={() => navigate("meeting")}
             roomAssignments={roomAssignments}
           />
         )}
 
-        {!bibiSurface && view === "meeting" && activeMeetings.length > 0 && (
+        {specialistSurfaceReady && view === "meeting" && effectiveMeetings.length > 0 && (
           <nav className="meeting-runtime-tabs" aria-label="열린 회의" role="tablist">
-            {activeMeetings.map((meeting) => (
+            {effectiveMeetings.map((meeting) => (
               <div key={meeting.id} className={`meeting-runtime-tab ${selectedMeetingId === meeting.id ? "active" : ""}`}>
                 <button
                   type="button"
@@ -2172,54 +2250,60 @@ function OfficeApp() {
                   onClick={() => setSelectedMeetingId(meeting.id)}
                 >
                   <i className={meeting.status === "complete" ? "complete" : "running"} />
-                  <span><b>{cleanMeetingTopic(meeting.topic)}</b><small>{meetingArchiveCountdown(meeting, meetingClock)}</small></span>
+                  <span><b>{cleanMeetingTopic(meeting.topic)}</b><small>{bibiCloudView ? `${meeting.participants.length}명 · ${meeting.status === "complete" ? "완료" : "진행 중"}` : meetingArchiveCountdown(meeting, meetingClock)}</small></span>
                 </button>
-                <button
+                {!bibiCloudView && <button
                   type="button"
                   className="meeting-runtime-tab-close"
                   aria-label={`${cleanMeetingTopic(meeting.topic)} 회의 종료`}
                   title={meeting.status === "complete" ? "지금 아카이브로 이동" : "회의 종료"}
                   onClick={() => requestMeetingClose(meeting)}
-                >×</button>
+                >×</button>}
               </div>
             ))}
             <button type="button" className={`meeting-runtime-new ${!selectedMeetingId ? "active" : ""}`} onClick={() => setSelectedMeetingId("")}>+ 새 회의</button>
           </nav>
         )}
 
-        {!bibiSurface && activeMeetings.map((meeting) => (
+        {specialistSurfaceReady && effectiveMeetings.map((meeting) => (
           <div key={meeting.id} className="meeting-console-host" hidden={view !== "meeting" || selectedMeetingId !== meeting.id}>
-            <MeetingConsole
-              meeting={meeting}
-              onActivityChange={updateAgentActivity}
-              onMeetingComplete={handleMeetingComplete}
-              closeRequest={meetingCloseRequests[meeting.id]}
-              onMeetingClosed={handleMeetingClosed}
-              onMeetingReopened={handleMeetingReopened}
-              onExit={() => navigate("office")}
-            />
+            {bibiCloudView ? (
+              <BibiCloudMeetingConsole meeting={meeting} onExit={() => navigate("office")} />
+            ) : (
+              <MeetingConsole
+                meeting={meeting}
+                onActivityChange={updateAgentActivity}
+                onMeetingComplete={handleMeetingComplete}
+                closeRequest={meetingCloseRequests[meeting.id]}
+                onMeetingClosed={handleMeetingClosed}
+                onMeetingReopened={handleMeetingReopened}
+                onExit={() => navigate("office")}
+              />
+            )}
           </div>
         ))}
 
-        {!bibiSurface && view === "meeting" && !activeMeeting && (
+        {specialistSurfaceReady && view === "meeting" && !effectiveActiveMeeting && (
           <MeetingLobby
             profiles={profiles}
-            activeMeetings={activeMeetings}
+            activeMeetings={effectiveMeetings}
             onOpenMeeting={setSelectedMeetingId}
             onStartMeeting={startMeeting}
             onOpenOffice={() => openRoom("meeting")}
           />
         )}
 
-        {!bibiSurface && view === "kanban" && (
-          <HermesKanban onOpenAgent={startChat} onStartMeeting={startMeeting} />
+        {specialistSurfaceReady && view === "kanban" && (
+          <HermesKanban onOpenAgent={startChat} onStartMeeting={startMeeting} adapter={bibiCloudView ? bibiKanbanAdapter : null} />
         )}
 
-        {!bibiSurface && view === "data" && (
-          <DataRoom onStartChat={startChat} onStartMeeting={startMeeting} />
+        {specialistSurfaceReady && view === "data" && (
+          bibiCloudView
+            ? <BibiDataRoom artifacts={bibiCloudSnapshot?.artifacts ?? []} profiles={profiles} onStartChat={startChat} onStartMeeting={startMeeting} />
+            : <DataRoom onStartChat={startChat} onStartMeeting={startMeeting} />
         )}
 
-        {!bibiSurface && (
+        {specialistSurfaceReady && !bibiCloudView && (
         <section
           className={`page-card chat-page persistent-chat-runtime ${view === "chat" ? "" : "is-background"}`}
           aria-hidden={view !== "chat"}
@@ -2236,19 +2320,32 @@ function OfficeApp() {
               branchFrom={branchFrom}
               onBranchHandled={handleBranchHandled}
               profiles={profiles}
-              activities={agentActivities}
+              activities={effectiveActivities}
               onActivityChange={updateAgentActivity}
               onStartMeeting={startMeeting}
               onGovernanceApprovalRequest={addGovernanceApproval}
-              // This runtime stays mounted behind every view. The Bibi surface
-              // is served without a Hermes gateway, so its legacy WebSocket
-              // ticket must not be minted while that surface is the active one.
-              legacyRealtime={!bibiSurface}
+              legacyRealtime
             />
         </section>
         )}
 
-        {!bibiSurface && view === "sessions" && (
+        {specialistSurfaceReady && bibiCloudView && view === "chat" && (
+          <section className="page-card chat-page persistent-chat-runtime">
+            <PageIntro
+              eyebrow="DIRECT LINE"
+              title="구성원별 직접 대화"
+              description="선택한 Bibi 조직 ID와 실제 Hermes 실행 프로필에 연결하며, 다른 구성원의 대화와 섞이지 않습니다."
+            />
+            <BibiDirectChat
+              snapshot={bibiCloudSnapshot}
+              profiles={profiles}
+              initialProfile={chatProfile === "default" ? "bibi-01" : chatProfile}
+              initialConversationId={chatSessionId}
+            />
+          </section>
+        )}
+
+        {specialistSurfaceReady && view === "sessions" && (
           <section className="page-card sessions-page">
             <PageIntro
               eyebrow="CONVERSATION ARCHIVE"
@@ -2257,6 +2354,8 @@ function OfficeApp() {
             />
             <SessionArchive
               profiles={profiles}
+              cloudArchive={bibiCloudView ? bibiCloudSnapshot?.archive ?? [] : null}
+              cloudMeetings={bibiCloudView ? bibiCloudSnapshot?.meetings ?? [] : null}
               onContinue={continueSession}
               onBranch={branchSession}
               onTerminal={openSessionTerminal}
@@ -2269,12 +2368,12 @@ function OfficeApp() {
           </section>
         )}
 
-        {!bibiSurface && view === "team" && (
+        {specialistSurfaceReady && view === "team" && (
           <section className="team-page">
             <TeamWorkspace
               profiles={profiles}
-              activities={agentActivities}
-              missions={missions}
+              activities={effectiveActivities}
+              missions={effectiveMissions}
               organization={organization}
               organizationStatus={organizationStatus}
               organizationError={organizationError}

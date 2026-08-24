@@ -19,7 +19,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { BIBI_VIEW_ID, isBibiSurface } from "../src/bibi/surface.js";
+import { BIBI_VIEW_ID, isBibiCloudView, isBibiSurface } from "../src/bibi/surface.js";
 import { OFFICE_BRAND_MARK_SRC } from "../src/branding.js";
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -78,8 +78,9 @@ function mediaBlock(css, query) {
 
 test("the Bibi surface is identified by one shared predicate", () => {
   assert.equal(BIBI_VIEW_ID, "ceo");
+  assert.equal(isBibiSurface("ceo"), true);
   for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team"]) {
-    assert.equal(isBibiSurface(view), true, `${view} is an owner-data Bibi surface`);
+    assert.equal(isBibiCloudView(view), true, `${view} is an owner-data Bibi route`);
   }
   for (const other of ["plugins", "system", "terminal", "", null, undefined]) {
     assert.equal(isBibiSurface(other), false, `${String(other)} remains a legacy system surface`);
@@ -109,11 +110,11 @@ test("legacy Hermes core-health errors are withheld only while the Bibi surface 
 
   // The gate is inside refresh, so the banner text is never even produced there.
   assert.match(app, /const reportError = \(message\) => \{\s*if \(bibiSurfaceRef\.current\) return;\s*setError\(message\);\s*\};/);
-  assert.match(app, /bibiSurfaceRef\.current = isBibiSurface\(view\);/);
+  assert.match(app, /bibiSurfaceRef\.current = isBibiCloudView\(view\);/);
   assert.match(app, /reportError\(loadError\.message\);/);
   assert.match(app, /reportError\(`Hermes 업무 보드를 불러오지 못했습니다\./);
   // …and the banner itself is hidden on that surface only.
-  assert.match(app, /\{error && !officeNotice && !bibiSurface && \(/);
+  assert.match(app, /\{error && !officeNotice && !bibiCloudView && \(/);
   // The suppression must be surface-scoped: no unconditional silencing.
   assert.doesNotMatch(app, /\{error && !officeNotice && \(/);
   assert.doesNotMatch(app, /setError\(loadError\.message\);/);
@@ -127,11 +128,11 @@ test("connection state is still tracked on the Bibi surface", async () => {
   assert.match(app, /reportError\(loadError\.message\);\s*setConnection\("offline"\);/);
 });
 
-test("legacy online-count and refresh chrome is hidden on the Bibi surface only", async () => {
+test("legacy online-count and refresh chrome is hidden on owner-data cloud routes", async () => {
   const app = await read("src/App.jsx");
 
-  assert.match(app, /\{!bibiSurface && \(\s*<span className="topbar-signal">/);
-  assert.match(app, /\{!bibiSurface && <button type="button" onClick=\{refresh\}>새로고침<\/button>\}/);
+  assert.match(app, /\{!bibiCloudView && \(\s*<span className="topbar-signal">/);
+  assert.match(app, /\{!bibiCloudView && <button type="button" onClick=\{refresh\}>새로고침<\/button>\}/);
   // Upstream views keep the chrome: it is conditioned, never deleted.
   assert.match(app, /명 온라인<\/span>/);
 });

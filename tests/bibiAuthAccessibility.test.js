@@ -15,7 +15,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { AUTH_GATE, isAuthLocked, isBibiSurface } from "../src/bibi/surface.js";
+import { AUTH_GATE, isAuthLocked, isBibiCloudView, isBibiSurface } from "../src/bibi/surface.js";
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const read = (relative) => readFile(path.join(projectRoot, relative), "utf8");
@@ -170,11 +170,13 @@ test("the auth gate has an explicit vocabulary and defaults to locked", () => {
 
 test("the lock applies to every owner-data Bibi surface and not legacy system tools", () => {
   for (const view of ["ceo", "office", "chat", "meeting", "kanban", "data", "command", "sessions", "team"]) {
-    assert.equal(isBibiSurface(view), true);
+    assert.equal(isBibiCloudView(view), true);
     assert.equal(isAuthLocked(view, AUTH_GATE.LOCKED), true, `${view} must be locked`);
   }
+  assert.equal(isBibiSurface("ceo"), true, "only the CEO uses the BibiWorkspace renderer");
+  assert.equal(isBibiSurface("office"), false, "office keeps the canonical visual renderer");
   for (const legacy of ["plugins", "system", "terminal"]) {
-    assert.equal(isBibiSurface(legacy), false);
+    assert.equal(isBibiCloudView(legacy), false);
     assert.equal(isAuthLocked(legacy, AUTH_GATE.LOCKED), false);
   }
 });
@@ -196,7 +198,7 @@ test("locked navigation is disabled in fact, not merely dimmed", async () => {
   const app = await read("src/App.jsx");
 
   assert.match(app, /const authLocked = isAuthLocked\(view, bibiAuthGate\);/);
-  assert.match(app, /<BibiWorkspace surface=\{view\} onAuthGateChange=\{setBibiAuthGate\} \/>/);
+  assert.match(app, /<BibiWorkspace[\s\S]*?surface=\{view\}[\s\S]*?onAuthGateChange=\{setBibiAuthGate\}[\s\S]*?\/>/);
 
   // Both navigations, and both must carry the real attribute — appearance
   // alone is a claim a mouse can disprove.

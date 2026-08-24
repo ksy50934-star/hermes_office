@@ -205,7 +205,7 @@ function emptyMoveForm(task) {
   };
 }
 
-export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
+export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = null }) {
   const [board, setBoard] = useState(loadCachedBoard);
   const [loading, setLoading] = useState(() => !loadCachedBoard().columns?.length);
   const [error, setError] = useState("");
@@ -232,12 +232,14 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
   const loadBoard = useCallback(async () => {
     try {
       setError("");
-      const [nextBoard, diagnostics, stats, workers] = await Promise.all([
-        hermesFetch("/api/plugins/kanban/board", { cacheTtlMs: 10000 }),
-        hermesFetch("/api/plugins/kanban/diagnostics", { cacheTtlMs: 15000 }).catch((error) => ({ error: error.message })),
-        hermesFetch("/api/plugins/kanban/stats", { cacheTtlMs: 15000 }).catch((error) => ({ error: error.message })),
-        hermesFetch("/api/plugins/kanban/workers/active", { cacheTtlMs: 10000 }).catch((error) => ({ error: error.message })),
-      ]);
+      const [nextBoard, diagnostics, stats, workers] = adapter
+        ? await adapter.loadBoard()
+        : await Promise.all([
+          hermesFetch("/api/plugins/kanban/board", { cacheTtlMs: 10000 }),
+          hermesFetch("/api/plugins/kanban/diagnostics", { cacheTtlMs: 15000 }).catch((error) => ({ error: error.message })),
+          hermesFetch("/api/plugins/kanban/stats", { cacheTtlMs: 15000 }).catch((error) => ({ error: error.message })),
+          hermesFetch("/api/plugins/kanban/workers/active", { cacheTtlMs: 10000 }).catch((error) => ({ error: error.message })),
+        ]);
       const normalizedBoard = normalizeOfficeBoard(nextBoard);
       setBoard(normalizedBoard);
       setNativeOps({ diagnostics, stats, workers });
@@ -247,7 +249,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [adapter]);
 
   useEffect(() => {
     const initial = window.setTimeout(loadBoard, 0);
@@ -312,7 +314,8 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
   const createTask = async () => {
     if (!title.trim()) return;
     try {
-      await hermesFetch("/api/plugins/kanban/tasks", {
+      if (adapter) await adapter.createTask({ title, assignee });
+      else await hermesFetch("/api/plugins/kanban/tasks", {
         method: "POST",
         body: JSON.stringify(officialCreateTaskPayload({ title, assignee })),
       });
@@ -326,12 +329,13 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
   const runOfficialDispatch = async () => {
     try {
       setNotice("Hermes dispatcher를 실행 중입니다.");
-      await hermesFetch("/api/plugins/kanban/dispatch", {
+      if (adapter) await adapter.dispatch();
+      else await hermesFetch("/api/plugins/kanban/dispatch", {
         method: "POST",
         body: JSON.stringify({}),
         timeoutMs: 60000,
       });
-      setNotice("Hermes dispatcher 실행이 완료되었습니다.");
+      setNotice(adapter ? "Bibi connector가 배정 업무를 가져가도록 대기열을 갱신했습니다." : "Hermes dispatcher 실행이 완료되었습니다.");
       await loadBoard();
     } catch (dispatchError) {
       setError(dispatchError.message);
@@ -339,13 +343,16 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
   };
 
   const patchTask = async (task, patch, eventText = "", eventType = "action") => {
-    const result = await patchOfficeTaskFromLatest(hermesFetch, task.id, patch, (latestTask) => {
+    const metadataForTask = (latestTask) => {
       const baseMetadata = {
         ...(latestTask.metadata ?? {}),
         ...(patch.metadata ?? {}),
       };
       return eventText ? addEventToMetadata(latestTask, baseMetadata, eventText, eventType) : baseMetadata;
-    });
+    };
+    const result = adapter
+      ? await adapter.patchTask(task, patch, metadataForTask)
+      : await patchOfficeTaskFromLatest(hermesFetch, task.id, patch, metadataForTask);
     const nextTask = result.task;
     setSelectedTask((current) => (current?.id === task.id ? nextTask : current));
     await loadBoard();
@@ -422,12 +429,13 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting }) {
       closeMoveDialog();
 
       if (movePlan.dispatch) {
-        await hermesFetch("/api/plugins/kanban/dispatch", {
+        if (adapter) await adapter.dispatch();
+        else await hermesFetch("/api/plugins/kanban/dispatch", {
           method: "POST",
           body: JSON.stringify({}),
           timeoutMs: 60000,
         });
-        setNotice("실행 준비 전환 후 공식 dispatcher 호출을 완료했습니다.");
+        setNotice(adapter ? "실행 준비 전환 후 Bibi connector 대기열을 갱신했습니다." : "실행 준비 전환 후 공식 dispatcher 호출을 완료했습니다.");
         await loadBoard();
         onOpenAgent?.({
           profile: nextTask.assignee ?? "default",

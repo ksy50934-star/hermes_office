@@ -1,4 +1,14 @@
 import { toUiProfileId } from "./profileIds.js";
+import { BIBI_ROSTER } from "./bibi/roster.js";
+
+const BIBI_COLORS = ["#e8774f", "#6f8fa3", "#d09a69", "#8c9c72", "#b18ca4", "#7a9f8e"];
+const BIBI_TEAM_META = Object.fromEntries(BIBI_ROSTER.map((profile, index) => [profile.id, {
+  name: profile.displayName,
+  role: profile.mandate,
+  initials: String(profile.ordinal).padStart(2, "0"),
+  color: BIBI_COLORS[index % BIBI_COLORS.length],
+  avatar: "",
+}]));
 
 export const TEAM_META = {
   default: { name: "총괄 에이전트", role: "리더십 · 총괄 오케스트레이션", initials: "HQ", color: "#e8774f", avatar: "/agents/director.png" },
@@ -10,6 +20,7 @@ export const TEAM_META = {
   "hermes-customer": { name: "고객 에이전트", role: "고객 경험 · 상담", initials: "CS", color: "#c18872", avatar: "/agents/customer.png" },
   "hermes-finance": { name: "재무 에이전트", role: "재무 · KPI", initials: "FN", color: "#7f8fbc", avatar: "/agents/finance.png" },
   "hermes-technology": { name: "기술 에이전트", role: "기술 · 자동화 및 보안", initials: "IT", color: "#728f92", avatar: "/agents/technology.png" },
+  ...BIBI_TEAM_META,
 };
 
 export const OFFICE_FLOOR_ZONES = [

@@ -58,7 +58,10 @@ import {
   fileWork,
   loadChatDispatch,
   loadConnectorState,
+  loadConversationArchive,
   loadConversations,
+  loadDataRoomArtifacts,
+  loadMeetings,
   loadMessages,
   loadRoster,
   loadWorkDetail,
@@ -665,7 +668,7 @@ function consumeAuthCallback() {
   return capturedCallback;
 }
 
-export default function BibiWorkspace({ surface = "ceo", onAuthGateChange }) {
+export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, controllerOnly = false, onCloudSnapshot }) {
   const cloud = useMemo(() => getCloudConfig(), []);
   const callback = useMemo(() => consumeAuthCallback(), []);
   const [session, setSession] = useState(null);
@@ -688,6 +691,9 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange }) {
     reportedProfileIds: [],
   }));
   const [workItems, setWorkItems] = useState([]);
+  const [archive, setArchive] = useState([]);
+  const [meetings, setMeetings] = useState([]);
+  const [artifacts, setArtifacts] = useState([]);
   const [openWorkId, setOpenWorkId] = useState(null);
   const [workDetail, setWorkDetail] = useState(null);
   const [activeProfileId, setActiveProfileId] = useState(CEO_PROFILE_ID);
@@ -759,12 +765,15 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange }) {
   // ---- workspace snapshot --------------------------------------------------
   const loadSnapshot = useCallback(async () => {
     if (!cloud.configured || !ownerId) return null;
-    const [rosterRows, connectorState, items] = await Promise.all([
+    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows] = await Promise.all([
       loadRoster(),
       loadConnectorState(),
       loadWorkItems(),
+      loadConversationArchive(),
+      loadMeetings(),
+      loadDataRoomArtifacts(),
     ]);
-    return { rosterRows, connectorState, items };
+    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows };
   }, [cloud.configured, ownerId]);
 
   const applySnapshot = useCallback((snapshot) => {
@@ -774,6 +783,9 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange }) {
     setRoster(snapshot.rosterRows.length ? snapshot.rosterRows : localRoster());
     setConnector(snapshot.connectorState);
     setWorkItems(snapshot.items);
+    setArchive(snapshot.archiveRows);
+    setMeetings(snapshot.meetingRows);
+    setArtifacts(snapshot.artifactRows);
     setError("");
   }, []);
 
@@ -946,6 +958,20 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange }) {
 
   const activeProfile = roster.find((profile) => profile.id === activeProfileId) ?? roster[0];
 
+  useEffect(() => {
+    if (!ownerId || passwordSetup || !onCloudSnapshot) return;
+    onCloudSnapshot({
+      ownerId,
+      roster,
+      connector,
+      workItems,
+      archive,
+      meetings,
+      artifacts,
+      revision: cloudRevision,
+    });
+  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, cloudRevision]);
+
   // ---- auth transition -----------------------------------------------------
   // Every screen before this one is a short card and this one is a long
   // three-pane layout, rendered into the same shell container. The container
@@ -1111,6 +1137,8 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange }) {
       </div>
     );
   }
+
+  if (controllerOnly) return null;
 
   const surfaceCopy = {
     ceo: ["Bibi Workspace", "CEO비비와 이야기하고, 열여덟 개 프로필에 업무를 맡깁니다."],
