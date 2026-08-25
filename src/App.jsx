@@ -1717,8 +1717,9 @@ function OfficeApp() {
     const ownerId = bibiCloudSnapshot?.ownerId;
     if (!bibiCloudView || !ownerId || cloudOrganization.revision !== 0 || cloudOrganization.nodes.length || !profiles.length || cloudOrganizationSeedStartedRef.current) return;
     cloudOrganizationSeedStartedRef.current = true;
-    const defaults = buildCanonicalBibiOrganizationNodes(profiles);
-    saveCloudOrganization({ ownerId, nodes: defaults, expectedRevision: 0, audit: cloudOrganization.audit })
+    Promise.resolve()
+      .then(() => buildCanonicalBibiOrganizationNodes(profiles))
+      .then((defaults) => saveCloudOrganization({ ownerId, nodes: defaults, expectedRevision: 0, audit: cloudOrganization.audit }))
       .then((state) => setBibiCloudSnapshot((current) => current ? { ...current, organization: state } : current))
       .catch((saveError) => {
         if (saveError.status === 409 && saveError.current) {

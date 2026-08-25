@@ -79,11 +79,15 @@ export function buildDefaultOrganizationNodes(profiles = []) {
  * organization chart.
  */
 export function buildCanonicalBibiOrganizationNodes(profiles = []) {
-  const ids = [...new Set(profiles.map((profile) => {
+  if (!Array.isArray(profiles) || profiles.length !== BIBI_PROFILE_IDS.length) {
+    throw new Error("Canonical Bibi organization requires exactly bibi-01 through bibi-18.");
+  }
+  const ids = profiles.map((profile) => {
     const raw = String(typeof profile === "string" ? profile : profile?.name ?? profile?.id ?? "").trim();
     return toOrganizationProfileId(raw) ?? (BIBI_PROFILE_IDS.includes(raw) ? raw : null);
-  }).filter(Boolean))];
-  const complete = ids.length === BIBI_PROFILE_IDS.length
+  });
+  const complete = ids.every(Boolean)
+    && new Set(ids).size === BIBI_PROFILE_IDS.length
     && BIBI_PROFILE_IDS.every((id) => ids.includes(id));
   if (!complete) {
     throw new Error("Canonical Bibi organization requires exactly bibi-01 through bibi-18.");

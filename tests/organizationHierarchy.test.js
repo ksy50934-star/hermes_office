@@ -51,6 +51,36 @@ test("canonical Bibi organization rejects a partial or foreign roster instead of
     ]),
     /exactly bibi-01 through bibi-18/i,
   );
+  assert.throws(
+    () => buildCanonicalBibiOrganizationNodes([
+      ...BIBI_PROFILE_IDS.map((name) => ({ name })),
+      { name: "foreign-profile" },
+    ]),
+    /exactly bibi-01 through bibi-18/i,
+  );
+  assert.throws(
+    () => buildCanonicalBibiOrganizationNodes([
+      ...BIBI_PROFILE_IDS.map((name) => ({ name })),
+      { name: "bibi-18" },
+    ]),
+    /exactly bibi-01 through bibi-18/i,
+  );
+  assert.throws(
+    () => buildCanonicalBibiOrganizationNodes([
+      { name: "default" },
+      { name: "bibi-01" },
+      ...BIBI_PROFILE_IDS.slice(2).map((name) => ({ name })),
+    ]),
+    /exactly bibi-01 through bibi-18/i,
+  );
+});
+
+test("cloud seed construction is inside the promise rejection path", async () => {
+  const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(
+    appSource,
+    /Promise\.resolve\(\)[\s\S]*?\.then\(\(\) => buildCanonicalBibiOrganizationNodes\(profiles\)\)[\s\S]*?\.then\(\(defaults\) => saveCloudOrganization/,
+  );
 });
 
 test("the primary Hermes profile and UI alias collapse into one organization node", () => {

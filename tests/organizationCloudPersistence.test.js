@@ -36,11 +36,14 @@ test("forward migration repairs existing owner organization rows without discard
   assert.doesNotMatch(sql, /delete\s+from\s+public\.bibi_organization_states/i);
 });
 
-test("remote verification fails closed without a real canonical owner row", async () => {
-  const sql = await read("supabase/migrations/20260825000300_verify_canonical_ceo_reporting_structure.sql");
+test("forward-only remote verification requires the exact Bibi roster and executable adversarial fixtures", async () => {
+  const sql = await read("supabase/migrations/20260825000400_verify_exact_canonical_ceo_roster.sql");
   assert.match(sql, /v_canonical_rows < 1/i);
   assert.match(sql, /CANONICAL_ORGANIZATION_ROW_MISSING/i);
   assert.match(sql, /CANONICAL_ORGANIZATION_DRIFT/i);
-  assert.match(sql, /node->>'id' = 'default'/i);
+  assert.match(sql, /v_expected_ids text\[\]/i);
+  assert.match(sql, /array_agg\(node->>'id' order by node->>'id'\) = v_expected_ids/i);
+  assert.match(sql, /foreign-17/i);
+  assert.match(sql, /ADVERSARIAL_FOREIGN_ROSTER_ACCEPTED/i);
   assert.match(sql, /node->>'id' <> 'bibi-01'[\s\S]*?node->>'parentId' is distinct from 'bibi-01'/i);
 });
