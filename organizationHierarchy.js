@@ -1,4 +1,9 @@
 import { toUiProfileId } from "./src/profileIds.js";
+import {
+  BIBI_PROFILE_IDS,
+  CEO_PROFILE_ID,
+  toOrganizationProfileId,
+} from "./src/bibi/roster.js";
 
 export const ORGANIZATION_VERSION = 1;
 export const ORGANIZATION_MAX_NODES = 100;
@@ -65,6 +70,32 @@ export function buildDefaultOrganizationNodes(profiles = []) {
       order: preset.order === 99 ? index : preset.order,
     };
   });
+}
+
+/**
+ * Build the authoritative Bibi chart with organizational role IDs. The CEO's
+ * physical executor is `default`, but the visible and durable role is bibi-01.
+ * A partial connector report is rejected rather than becoming a truncated
+ * organization chart.
+ */
+export function buildCanonicalBibiOrganizationNodes(profiles = []) {
+  const ids = [...new Set(profiles.map((profile) => {
+    const raw = String(typeof profile === "string" ? profile : profile?.name ?? profile?.id ?? "").trim();
+    return toOrganizationProfileId(raw) ?? (BIBI_PROFILE_IDS.includes(raw) ? raw : null);
+  }).filter(Boolean))];
+  const complete = ids.length === BIBI_PROFILE_IDS.length
+    && BIBI_PROFILE_IDS.every((id) => ids.includes(id));
+  if (!complete) {
+    throw new Error("Canonical Bibi organization requires exactly bibi-01 through bibi-18.");
+  }
+
+  return BIBI_PROFILE_IDS.map((id, index) => ({
+    id,
+    parentId: id === CEO_PROFILE_ID ? null : CEO_PROFILE_ID,
+    department: id === CEO_PROFILE_ID ? "leadership" : "general",
+    roomId: id === CEO_PROFILE_ID ? "executive" : "operations",
+    order: index,
+  }));
 }
 
 function canonicalNode(raw, index) {

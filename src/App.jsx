@@ -45,7 +45,7 @@ import {
   profileUpdateRequests,
 } from "./officialContracts.js";
 import { useModalFocus } from "./useModalFocus.js";
-import { buildDefaultOrganizationNodes, organizationRoomAssignments, validateOrganizationNodes } from "../organizationHierarchy.js";
+import { buildCanonicalBibiOrganizationNodes, buildDefaultOrganizationNodes, organizationRoomAssignments, validateOrganizationNodes } from "../organizationHierarchy.js";
 import { OFFICE_BRAND_MARK, OFFICE_BRAND_MARK_SRC, OFFICE_WORKSPACE_LABEL } from "./branding.js";
 import {
   hydrateActiveMeetings,
@@ -1717,7 +1717,7 @@ function OfficeApp() {
     const ownerId = bibiCloudSnapshot?.ownerId;
     if (!bibiCloudView || !ownerId || cloudOrganization.revision !== 0 || cloudOrganization.nodes.length || !profiles.length || cloudOrganizationSeedStartedRef.current) return;
     cloudOrganizationSeedStartedRef.current = true;
-    const defaults = buildDefaultOrganizationNodes(profiles);
+    const defaults = buildCanonicalBibiOrganizationNodes(profiles);
     saveCloudOrganization({ ownerId, nodes: defaults, expectedRevision: 0, audit: cloudOrganization.audit })
       .then((state) => setBibiCloudSnapshot((current) => current ? { ...current, organization: state } : current))
       .catch((saveError) => {

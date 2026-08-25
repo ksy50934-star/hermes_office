@@ -22,3 +22,25 @@ test("organization browser client uses the atomic RPC and reports stale revision
   assert.match(client, /conflict\.status = 409/);
   assert.doesNotMatch(client, /from\("bibi_organization_states"\)[\s\S]{0,300}\.update\(/);
 });
+
+test("forward migration repairs existing owner organization rows without discarding visual placement", async () => {
+  const sql = await read("supabase/migrations/20260825000200_canonical_ceo_reporting_structure.sql");
+  assert.match(sql, /update public\.bibi_organization_states/i);
+  assert.match(sql, /'bibi-01'/i);
+  assert.match(sql, /jsonb_set\([\s\S]*?\{parentId\}/i);
+  assert.match(sql, /jsonb_array_length\(state\.nodes\) = 18/i);
+  assert.match(sql, /count\(distinct node->>'id'\) = 18/i);
+  assert.match(sql, /state\.nodes @>/i);
+  assert.match(sql, /revision = state\.revision \+ 1/i);
+  assert.match(sql, /audit = state\.audit \|\|/i);
+  assert.doesNotMatch(sql, /delete\s+from\s+public\.bibi_organization_states/i);
+});
+
+test("remote verification fails closed without a real canonical owner row", async () => {
+  const sql = await read("supabase/migrations/20260825000300_verify_canonical_ceo_reporting_structure.sql");
+  assert.match(sql, /v_canonical_rows < 1/i);
+  assert.match(sql, /CANONICAL_ORGANIZATION_ROW_MISSING/i);
+  assert.match(sql, /CANONICAL_ORGANIZATION_DRIFT/i);
+  assert.match(sql, /node->>'id' = 'default'/i);
+  assert.match(sql, /node->>'id' <> 'bibi-01'[\s\S]*?node->>'parentId' is distinct from 'bibi-01'/i);
+});

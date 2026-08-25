@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   addOrganizationNode,
+  buildCanonicalBibiOrganizationNodes,
   buildDefaultOrganizationNodes,
   moveOrganizationNode,
   organizationReportingContext,
@@ -12,6 +13,7 @@ import {
   removeOrganizationNode,
   validateOrganizationNodes,
 } from "../organizationHierarchy.js";
+import { BIBI_PROFILE_IDS } from "../src/bibi/roster.js";
 
 const profiles = [
   { name: "default" },
@@ -26,6 +28,29 @@ test("default hierarchy contains every actual Hermes profile exactly once", () =
   assert.equal(nodes.find((node) => node.id === "default")?.parentId, null);
   assert.equal(nodes.find((node) => node.id === "hermes-operations")?.parentId, "default");
   assert.equal(nodes.find((node) => node.id === "hermes-brand")?.parentId, "hermes-operations");
+});
+
+test("canonical Bibi organization places all seventeen specialists directly under CEO비비", () => {
+  const nodes = buildCanonicalBibiOrganizationNodes(BIBI_PROFILE_IDS.map((name) => ({ name })));
+
+  assert.deepEqual(nodes.map((node) => node.id), BIBI_PROFILE_IDS);
+  assert.equal(nodes.find((node) => node.id === "bibi-01")?.parentId, null);
+  assert.equal(nodes.filter((node) => node.id !== "bibi-01" && node.parentId === "bibi-01").length, 17);
+  assert.equal(nodes.some((node) => node.id !== "bibi-01" && node.parentId !== "bibi-01"), false);
+});
+
+test("canonical Bibi organization rejects a partial or foreign roster instead of guessing", () => {
+  assert.throws(
+    () => buildCanonicalBibiOrganizationNodes([{ name: "bibi-01" }, { name: "bibi-02" }]),
+    /exactly bibi-01 through bibi-18/i,
+  );
+  assert.throws(
+    () => buildCanonicalBibiOrganizationNodes([
+      ...BIBI_PROFILE_IDS.slice(0, 17).map((name) => ({ name })),
+      { name: "hermes-brand" },
+    ]),
+    /exactly bibi-01 through bibi-18/i,
+  );
 });
 
 test("the primary Hermes profile and UI alias collapse into one organization node", () => {
