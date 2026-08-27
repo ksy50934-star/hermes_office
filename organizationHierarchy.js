@@ -210,8 +210,11 @@ export function migrateOrganizationRoom(id, roomId) {
 }
 
 /**
- * True when the chart still carries the exact seating v1 produced: the CEO in
- * 대표실 and every other Bibi member in 운영실, with no one anywhere else.
+ * True when the chart still carries a known collapsed legacy seating shape:
+ * the CEO in 대표실 and every other Bibi member in 운영실, or the production
+ * variant that put the complete eighteen-member roster in 운영실 including the
+ * CEO. The latter requires the exact complete roster so a partial/user chart is
+ * never mistaken for legacy data.
  *
  * That shape is what `buildCanonicalBibiOrganizationNodes` used to emit, so
  * recognising it is what lets the seating contract be applied to charts that
@@ -226,8 +229,13 @@ export function organizationHasCollapsedRooms(nodes) {
     .filter((node) => BIBI_ROOM_ASSIGNMENTS[node.id]);
   const others = members.filter((node) => node.id !== CEO_PROFILE_ID);
   if (others.length === 0) return false;
-  return others.every((node) => node.roomId === ORGANIZATION_DEFAULT_ROOM)
-    && members.every((node) => node.id !== CEO_PROFILE_ID || node.roomId === "executive");
+  if (!others.every((node) => node.roomId === ORGANIZATION_DEFAULT_ROOM)) return false;
+  const ceo = members.find((node) => node.id === CEO_PROFILE_ID);
+  if (ceo?.roomId === "executive") return true;
+  if (ceo?.roomId !== ORGANIZATION_DEFAULT_ROOM) return false;
+  return nodes.length === Object.keys(BIBI_ROOM_ASSIGNMENTS).length
+    && members.length === Object.keys(BIBI_ROOM_ASSIGNMENTS).length
+    && new Set(members.map((node) => node.id)).size === Object.keys(BIBI_ROOM_ASSIGNMENTS).length;
 }
 
 /**

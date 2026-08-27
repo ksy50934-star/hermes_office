@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { PGlite } from "@electric-sql/pglite";
 
 import {
   BIBI_ROOM_ASSIGNMENTS,
@@ -22,6 +23,10 @@ const SEATING_MIGRATION = new URL(
   "../supabase/migrations/20260826000200_bibi_room_seating.sql",
   import.meta.url,
 );
+const COLLAPSED_ROOM_REPAIR = new URL(
+  "../supabase/migrations/20260827000300_bibi_collapsed_room_repair.sql",
+  import.meta.url,
+);
 
 /** The seating v1 emitted: CEO in 대표실, everyone else dropped into 운영실. */
 function v1Chart() {
@@ -32,6 +37,10 @@ function v1Chart() {
     roomId: id === CEO_PROFILE_ID ? "executive" : "operations",
     order: index,
   }));
+}
+
+function allOperationsChart() {
+  return v1Chart().map((node) => ({ ...node, roomId: "operations" }));
 }
 
 test("every organization room is a real zone on the floor plan", () => {
@@ -131,6 +140,42 @@ test("a persisted v1 chart is seated on read, and write-back is requested", () =
   assert.equal(new Set(seated.map((node) => node.roomId)).size, ORGANIZATION_ROOMS.length);
 });
 
+test("the exact eighteen-member all-operations production variant is also repaired", () => {
+  const stored = allOperationsChart();
+  assert.equal(organizationHasCollapsedRooms(stored), true);
+  const seated = validateOrganizationNodes(stored);
+  for (const node of seated) assert.equal(node.roomId, BIBI_ROOM_ASSIGNMENTS[node.id]);
+
+  assert.equal(
+    organizationHasCollapsedRooms(stored.slice(0, 17)),
+    false,
+    "a partial all-operations chart is not safe to classify as legacy",
+  );
+  assert.equal(
+    organizationHasCollapsedRooms([...stored, {
+      id: "non-bibi",
+      parentId: null,
+      department: "support",
+      roomId: "operations",
+      order: 18,
+    }]),
+    false,
+    "a chart with an extra non-Bibi node is not the exact production legacy shape",
+  );
+  assert.equal(
+    organizationHasCollapsedRooms([...stored.slice(0, 17), stored[0]]),
+    false,
+    "a duplicate canonical id cannot stand in for the missing member",
+  );
+  assert.equal(
+    organizationHasCollapsedRooms(stored.map((node) => (
+      node.id === "bibi-04" ? { ...node, roomId: "creative" } : node
+    ))),
+    false,
+    "one explicit room choice preserves the whole user arrangement",
+  );
+});
+
 test("an office the user arranged is never re-seated", () => {
   // One member moved out of 운영실 is enough: the arrangement is theirs now.
   const arranged = v1Chart().map((node) => (
@@ -190,4 +235,49 @@ test("the Supabase migration only fires on the v1 collapse, and only rewrites ro
   // The revision is bumped once with an audit entry, like every other data migration here.
   assert.match(sql, /revision = state\.revision \+ 1/);
   assert.match(sql, /system:bibi-room-seating-v2/);
+});
+
+test("the forward repair executes once on exact all-operations data and preserves custom seating", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    create table bibi_organization_states (
+      owner_id uuid primary key,
+      revision integer not null,
+      nodes jsonb not null,
+      audit jsonb,
+      updated_at timestamptz not null default now()
+    );
+  `);
+  const collapsedNodes = allOperationsChart();
+  const arrangedNodes = allOperationsChart().map((node) => (
+    node.id === "bibi-04" ? { ...node, roomId: "creative" } : node
+  ));
+  const collapsed = JSON.stringify(collapsedNodes).replaceAll("'", "''");
+  const arranged = JSON.stringify(arrangedNodes).replaceAll("'", "''");
+  await db.exec(`
+    insert into bibi_organization_states (owner_id, revision, nodes, audit) values
+      ('00000000-0000-0000-0000-000000000001', 2, '${collapsed}'::jsonb, '[]'::jsonb),
+      ('00000000-0000-0000-0000-000000000002', 7, '${arranged}'::jsonb, '[]'::jsonb);
+  `);
+  const sql = await readFile(COLLAPSED_ROOM_REPAIR, "utf8");
+  await db.exec(sql);
+  await db.exec(sql);
+
+  const rows = await db.query(`
+    select owner_id::text, revision, nodes, audit
+      from bibi_organization_states order by owner_id
+  `);
+  const repaired = rows.rows[0];
+  const custom = rows.rows[1];
+  assert.equal(repaired.revision, 3, "repair is idempotent after rooms diverge");
+  assert.equal(repaired.audit.length, 1);
+  assert.equal(repaired.audit[0].actor, "system:bibi-room-seating-v2-all-operations-repair");
+  assert.deepEqual(
+    Object.fromEntries(repaired.nodes.map((node) => [node.id, node.roomId])),
+    { ...BIBI_ROOM_ASSIGNMENTS },
+  );
+  assert.equal(custom.revision, 7);
+  assert.deepEqual(custom.nodes, arrangedNodes);
+  assert.deepEqual(custom.audit, []);
+  await db.close();
 });
