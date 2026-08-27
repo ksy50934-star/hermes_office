@@ -3642,6 +3642,7 @@ main { min-width: 0; }
 .chat-status-line { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: #718078; font-size: 8px; }
 .profile-chat-composer > div:last-child,
 .chat-composer-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: stretch; gap: 9px; }
+.profile-chat-layout.bibi-direct-chat .chat-composer-row { grid-template-columns: minmax(0, 1fr) auto; }
 .profile-chat-composer textarea { min-height: 58px; resize: none; padding: 12px; border: 1px solid #cdd5cf; border-radius: 8px; outline: 0; color: #24352d; background: #fff; font: 12px/1.55 "Noto Sans KR", sans-serif; }
 .profile-chat-composer textarea:focus { border-color: #7b9d8e; box-shadow: 0 0 0 3px #e4ede8; }
 .profile-chat-composer button, .kanban-create button { padding: 0 20px; border: 0; border-radius: 8px; color: #fff; background: #20382e; font-weight: 700; }
@@ -6238,6 +6239,9 @@ main { min-width: 0; }
     gap: 7px !important;
     align-items: stretch;
   }
+  .profile-chat-layout.bibi-direct-chat .chat-composer-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
   .profile-chat-composer button.attach-button {
     width: 50px !important;
     min-width: 50px !important;
@@ -6742,6 +6746,9 @@ main { min-width: 0; }
 }
 
 @media (min-width: 641px) and (max-width: 820px) {
+  .profile-chat-layout.bibi-direct-chat .chat-composer-actions {
+    grid-column: auto;
+  }
   .page-card {
     margin: 10px;
     padding: 16px;

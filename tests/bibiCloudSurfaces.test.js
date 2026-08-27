@@ -59,3 +59,20 @@ test("the cloud surface renders the canonical 18-profile roster", async () => {
   assert.match(surfaces, /display_name/);
   assert.match(surfaces, /execution_profile/);
 });
+
+test("mobile direct chat keeps the textarea in a flexible two-column composer", async () => {
+  const [chat, styles] = await Promise.all([
+    read("src/BibiDirectChat.jsx"),
+    read("src/styles.css"),
+  ]);
+  const tabletStart = styles.indexOf("@media (min-width: 641px) and (max-width: 820px)");
+  const tabletEnd = styles.indexOf("@media (max-width: 430px)", tabletStart);
+  const tabletStyles = styles.slice(tabletStart, tabletEnd);
+  assert.match(chat, /profile-chat-layout bibi-direct-chat mobile-stage-/);
+  assert.doesNotMatch(chat, /attach-button/);
+  assert.match(styles, /\.profile-chat-layout\.bibi-direct-chat \.chat-composer-row\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) auto;/);
+  assert.match(styles, /\.chat-composer-actions\s*\{\s*grid-column:\s*1 \/ -1;/);
+  assert.ok(tabletStart >= 0 && tabletEnd > tabletStart);
+  assert.match(tabletStyles, /\.profile-chat-layout\.bibi-direct-chat \.chat-composer-actions\s*\{\s*grid-column:\s*auto;/);
+  assert.match(styles, /\.profile-chat-layout\.bibi-direct-chat \.chat-composer-row\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) auto !important;/);
+});

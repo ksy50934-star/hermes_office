@@ -80,7 +80,7 @@ export default function BibiDirectChat({ snapshot, profiles = [], initialProfile
   };
 
   return (
-    <div className={`profile-chat-layout mobile-stage-${mobileStage}`}>
+    <div className={`profile-chat-layout bibi-direct-chat mobile-stage-${mobileStage}`}>
       <section className="mobile-chat-start">
         {mobileStage === "people" ? (
           <>
