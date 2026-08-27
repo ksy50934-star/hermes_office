@@ -7,6 +7,7 @@ import { redactSecrets, sha256Hex } from "./evidence.js";
 
 const execFileAsync = promisify(execFile);
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+export const PROJECTION_BATCH_SIZE = 100;
 const LOCAL_PATHS = [
   /(?:^|[\s"'(])\/(?:Users|home|private|var\/folders)\/[A-Za-z0-9._~+@%/-]+/g,
   /(?:^|[\s"'(])[A-Za-z]:\\(?:[^\s"')]+\\?)+/g,
@@ -46,7 +47,21 @@ export function validateProjectionTarget(target) {
   if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) {
     throw new ProjectionError("Invalid projection checkpoint.", "INVALID_CHECKPOINT");
   }
-  return { ...target, organizationProfileId, executionProfileId, hermesSessionId, checkpoint };
+  const lifecycleCheckpoint = Number(target?.lifecycleCheckpoint ?? 0);
+  const nextLifecycleCheckpoint = Number(target?.nextLifecycleCheckpoint ?? lifecycleCheckpoint);
+  if (!Number.isSafeInteger(lifecycleCheckpoint) || lifecycleCheckpoint < 0
+    || !Number.isSafeInteger(nextLifecycleCheckpoint) || nextLifecycleCheckpoint < 0) {
+    throw new ProjectionError("Invalid lifecycle projection checkpoint.", "INVALID_LIFECYCLE_CHECKPOINT");
+  }
+  return {
+    ...target,
+    organizationProfileId,
+    executionProfileId,
+    hermesSessionId,
+    checkpoint,
+    lifecycleCheckpoint,
+    nextLifecycleCheckpoint,
+  };
 }
 
 function redactProjectionContent(value) {
@@ -144,13 +159,21 @@ export function createSqliteProjectionReader({ homeForProfile, sqliteBin = "sqli
       const target = validateProjectionTarget(rawTarget);
       const home = homeForProfile(target.executionProfileId);
       const dbPath = path.join(home, "state.db");
+      const lifecycleCheckpoint = target.lifecycleCheckpoint;
       const sql = [
         "select id, session_id, role, content, timestamp, active, compacted,",
         "tool_call_id, tool_calls, tool_name",
         "from messages",
         `where session_id = '${target.hermesSessionId}'`,
-        `and (id > ${target.checkpoint} or active = 0 or compacted = 1)`,
-        "order by id asc;",
+        "and role in ('user', 'assistant')",
+        "and tool_call_id is null and tool_calls is null and tool_name is null",
+        "and typeof(content) = 'text' and length(trim(content)) > 0",
+        `and (id > ${target.checkpoint} or ((active = 0 or compacted = 1) and id <= ${target.checkpoint}))`,
+        "order by case",
+        `when id > ${target.checkpoint} then 0`,
+        `when id > ${lifecycleCheckpoint} then 1`,
+        "else 2 end, id asc",
+        `limit ${PROJECTION_BATCH_SIZE};`,
       ].join(" ");
       let stdout;
       try {
@@ -168,7 +191,16 @@ export function createSqliteProjectionReader({ homeForProfile, sqliteBin = "sqli
       } catch {
         throw new ProjectionError("Hermes state query returned invalid JSON.", "STATE_DB_INVALID_JSON");
       }
-      return projectMessageRows(rows, target);
+      const lifecycleRows = rows.filter((row) => (
+        Number(row.id) <= target.checkpoint
+        && (Number(row.active ?? 1) === 0 || Number(row.compacted ?? 0) === 1)
+      ));
+      return {
+        messages: projectMessageRows(rows, target),
+        nextLifecycleCheckpoint: lifecycleRows.length
+          ? Number(lifecycleRows.at(-1).id)
+          : target.lifecycleCheckpoint,
+      };
     },
   };
 }
@@ -181,26 +213,43 @@ export function createProjectionRunner({ transport, reader } = {}) {
       try {
         targetResponse = await transport.listProjectionTargets();
       } catch (error) {
-        return { projected: 0, failed: 1, checkpoint: 0, error: error?.message ?? String(error) };
+        return {
+          projected: 0,
+          failed: 1,
+          checkpoint: 0,
+          errors: [{ code: error?.code ?? "TARGET_LIST_FAILED" }],
+        };
       }
       let projected = 0;
       let failed = 0;
       let checkpoint = 0;
+      const errors = [];
       for (const rawTarget of targetResponse?.targets ?? []) {
         let target;
         try {
           target = validateProjectionTarget(rawTarget);
-          const messages = await reader.readMessages(target);
+          const batch = await reader.readMessages(target);
+          const messages = Array.isArray(batch) ? batch : batch.messages;
+          const nextLifecycleCheckpoint = Array.isArray(batch)
+            ? target.lifecycleCheckpoint
+            : Number(batch.nextLifecycleCheckpoint ?? target.lifecycleCheckpoint);
           checkpoint = Math.max(checkpoint, target.checkpoint);
           if (!messages.length) continue;
-          const response = await transport.uploadProjection({ target, messages });
+          const response = await transport.uploadProjection({
+            target: { ...target, nextLifecycleCheckpoint },
+            messages,
+          });
           projected += Number(response?.accepted ?? messages.length);
           checkpoint = Math.max(checkpoint, Number(response?.checkpoint ?? target.checkpoint));
-        } catch {
+        } catch (error) {
           failed += 1;
+          errors.push({
+            bindingId: String(rawTarget?.bindingId ?? "").slice(-8),
+            code: error?.code ?? "PROJECTION_TARGET_FAILED",
+          });
         }
       }
-      return { projected, failed, checkpoint };
+      return { projected, failed, checkpoint, errors };
     },
   };
 }

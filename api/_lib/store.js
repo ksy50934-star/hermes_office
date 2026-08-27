@@ -138,12 +138,15 @@ export function createWorkspaceStore(supabase) {
       const checkpoints = unwrap(
         await supabase
           .from("projection_checkpoints")
-          .select("binding_id, last_source_message_id")
+          .select("binding_id, last_source_message_id, last_lifecycle_scan_message_id")
           .eq("owner_id", ownerId)
           .in("binding_id", bindings.map((binding) => binding.id)),
         "listProjectionTargets.checkpoints",
       ) ?? [];
-      const checkpointByBinding = new Map(checkpoints.map((row) => [row.binding_id, Number(row.last_source_message_id ?? 0)]));
+      const checkpointByBinding = new Map(checkpoints.map((row) => [row.binding_id, {
+        message: Number(row.last_source_message_id ?? 0),
+        lifecycle: Number(row.last_lifecycle_scan_message_id ?? 0),
+      }]));
       const workLinks = unwrap(
         await supabase
           .from("work_items")
@@ -173,7 +176,8 @@ export function createWorkspaceStore(supabase) {
         executionProfileId: binding.execution_profile_id,
         hermesSessionId: binding.hermes_session_id,
         channel: binding.channel,
-        checkpoint: checkpointByBinding.get(binding.id) ?? 0,
+        checkpoint: checkpointByBinding.get(binding.id)?.message ?? 0,
+        lifecycleCheckpoint: checkpointByBinding.get(binding.id)?.lifecycle ?? 0,
         canonicalLinks: linksByBinding.get(binding.id) ?? [],
       }));
     },
@@ -310,7 +314,7 @@ export function createWorkspaceStore(supabase) {
 
     async applyProjection({ ownerId, target, messages }) {
       const data = unwrap(
-        await supabase.rpc("bibi_apply_message_projection", {
+        await supabase.rpc("bibi_apply_message_projection_v2", {
           p_owner_id: ownerId,
           p_binding_id: target.bindingId,
           p_conversation_id: target.conversationId,
@@ -319,6 +323,7 @@ export function createWorkspaceStore(supabase) {
           p_hermes_session_id: target.hermesSessionId,
           p_channel: target.channel,
           p_messages: messages,
+          p_lifecycle_scan_cursor: target.nextLifecycleCheckpoint,
         }),
         "applyProjection",
       );
@@ -327,6 +332,7 @@ export function createWorkspaceStore(supabase) {
         accepted: Number(row?.accepted ?? 0),
         duplicates: Number(row?.duplicates ?? 0),
         checkpoint: Number(row?.checkpoint ?? target.checkpoint),
+        lifecycleCheckpoint: Number(row?.lifecycle_checkpoint ?? target.nextLifecycleCheckpoint),
       };
     },
 

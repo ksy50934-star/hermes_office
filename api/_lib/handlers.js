@@ -190,11 +190,19 @@ export async function handleProjectionUpload({ auth, body, store }) {
     throw error;
   }
 
+  const emptyBodySha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   if (!messages.length || messages.length > 500) {
     return failure(400, "INVALID_PROJECTION_BATCH", "Projection batch must contain 1 to 500 messages.");
   }
   for (const message of messages) {
+    const lifecycleState = String(message?.lifecycleState ?? "");
+    const validLifecycle = ["active", "deleted", "archived", "retention"].includes(lifecycleState);
+    const validBody = lifecycleState === "active"
+      ? typeof message?.body === "string" && message.body.length > 0
+      : typeof message?.body === "string"
+        && message.body.length === 0
+        && message?.contentSha256 === emptyBodySha256;
     const sameIdentity = message?.bindingId === target.bindingId
       && message?.conversationId === target.conversationId
       && message?.organizationProfileId === target.organizationProfileId
@@ -205,8 +213,8 @@ export async function handleProjectionUpload({ auth, body, store }) {
       && (message?.role === "user" || message?.role === "assistant")
       && Number.isSafeInteger(message?.sourceMessageId)
       && Number.isSafeInteger(message?.sourceSequence)
-      && typeof message?.body === "string"
-      && message.body.length > 0
+      && validLifecycle
+      && validBody
       && /^[0-9a-f]{64}$/.test(message?.contentSha256 ?? "")
       && Number.isFinite(Date.parse(message?.sourceTimestamp ?? ""));
     if (!validMessage) {

@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
+  PROJECTION_BATCH_SIZE,
   ProjectionError,
   createProjectionRunner,
+  createSqliteProjectionReader,
   projectMessageRows,
   validateProjectionTarget,
 } from "../connector/messageProjection.js";
@@ -167,4 +169,72 @@ test("offline failure leaves cloud checkpoint authoritative for replay after res
   assert.equal(replay.projected, 2);
   assert.equal(replay.checkpoint, 2);
   assert.deepEqual(uploads[0].messages, uploads[1].messages, "restart replay must be byte-for-byte deterministic");
+});
+
+test("SQLite projection filters hidden rows before JSON output and reads a bounded new-first batch", async () => {
+  let invocation;
+  const reader = createSqliteProjectionReader({
+    homeForProfile: () => "/safe/profile",
+    execFileImpl: async (binary, args, options) => {
+      invocation = { binary, args, options };
+      return { stdout: "[]" };
+    },
+  });
+  await reader.readMessages({ ...TARGET, checkpoint: 42 });
+
+  const sql = invocation.args.at(-1);
+  assert.equal(invocation.binary, "sqlite3");
+  assert.match(sql, /role in \('user', 'assistant'\)/);
+  assert.match(sql, /tool_call_id is null and tool_calls is null and tool_name is null/);
+  assert.match(sql, /typeof\(content\) = 'text' and length\(trim\(content\)\) > 0/);
+  assert.match(sql, /order by case when id > 42 then 0 when id > 0 then 1 else 2 end, id asc/);
+  assert.match(sql, new RegExp(`limit ${PROJECTION_BATCH_SIZE}`));
+  assert.equal(PROJECTION_BATCH_SIZE, 100);
+  assert.equal(invocation.options.maxBuffer, 2 * 1024 * 1024);
+});
+
+test("projection failures expose a bounded operational code without message or payload content", async () => {
+  const runner = createProjectionRunner({
+    transport: {
+      async listProjectionTargets() { return { targets: [TARGET] }; },
+      async uploadProjection() { throw new Error("must not upload"); },
+    },
+    reader: {
+      async readMessages() {
+        throw new ProjectionError("secret-shaped local detail", "STATE_DB_READ_FAILED");
+      },
+    },
+  });
+  const result = await runner.runOnce();
+  assert.deepEqual(result.errors, [{ bindingId: "inding-1", code: "STATE_DB_READ_FAILED" }]);
+  assert.equal(JSON.stringify(result).includes("secret-shaped"), false);
+});
+
+test("a separate circular lifecycle cursor scans more than one batch without starving later tombstones", async () => {
+  const ids = (start, end) => Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  const queryOrder = [ids(1, 100), ids(101, 200), [...ids(201, 250), ...ids(1, 50)]];
+  let call = 0;
+  const reader = createSqliteProjectionReader({
+    homeForProfile: () => "/safe/profile",
+    execFileImpl: async () => ({
+      stdout: JSON.stringify(queryOrder[call++].map((id) => row({
+        id,
+        active: 0,
+        content: `tombstone-${id}`,
+      }))),
+    }),
+  });
+
+  const first = await reader.readMessages({ ...TARGET, checkpoint: 1_000, lifecycleCheckpoint: 0 });
+  const second = await reader.readMessages({ ...TARGET, checkpoint: 1_000, lifecycleCheckpoint: first.nextLifecycleCheckpoint });
+  const wrapped = await reader.readMessages({ ...TARGET, checkpoint: 1_000, lifecycleCheckpoint: second.nextLifecycleCheckpoint });
+
+  assert.deepEqual([
+    first.nextLifecycleCheckpoint,
+    second.nextLifecycleCheckpoint,
+    wrapped.nextLifecycleCheckpoint,
+  ], [100, 200, 50]);
+  assert.equal(new Set([...first.messages, ...second.messages].map((message) => message.sourceMessageId)).size, 200);
+  assert.ok(wrapped.messages.some((message) => message.sourceMessageId === 250));
+  assert.ok(wrapped.messages.some((message) => message.sourceMessageId === 1), "the scan must wrap after reaching the end");
 });
