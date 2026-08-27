@@ -12,6 +12,15 @@ const LOCAL_PATHS = [
   /(?:^|[\s"'(])\/(?:Users|home|private|var\/folders)\/[A-Za-z0-9._~+@%/-]+/g,
   /(?:^|[\s"'(])[A-Za-z]:\\(?:[^\s"')]+\\?)+/g,
 ];
+const HERMES_COMPACTION_PREFIXES = [
+  "[CONTEXT COMPACTION",
+  "[CONTEXT SUMMARY]:",
+];
+const HERMES_INFRASTRUCTURE_PREFIXES = [
+  "[Your active task list was preserved across context compression]",
+];
+const ASYNC_DELEGATION_ENVELOPE = /^\[ASYNC DELEGATION (?:BATCH )?COMPLETE — deleg_[A-Za-z0-9_-]+\]/;
+const COMPACTION_END_MARKER = "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---";
 
 export class ProjectionError extends Error {
   constructor(message, code) {
@@ -84,6 +93,26 @@ function isPlainProjectableMessage(row) {
     && row.content.trim().length > 0;
 }
 
+function normalizeHermesEnvelope(content, displayKind) {
+  const value = String(content ?? "").trimStart();
+  if (HERMES_COMPACTION_PREFIXES.some((prefix) => value.startsWith(prefix))) {
+    const markerIndex = value.indexOf(COMPACTION_END_MARKER);
+    const remainder = markerIndex < 0
+      ? ""
+      : value.slice(markerIndex + COMPACTION_END_MARKER.length).trimStart();
+    if (!remainder) return { content: value, envelope: true, infrastructure: true };
+    return { ...normalizeHermesEnvelope(remainder, displayKind), envelope: true };
+  }
+  const infrastructure = displayKind === "hidden"
+    || HERMES_INFRASTRUCTURE_PREFIXES.some((prefix) => value.startsWith(prefix))
+    || ASYNC_DELEGATION_ENVELOPE.test(value);
+  return {
+    content: value,
+    envelope: infrastructure,
+    infrastructure,
+  };
+}
+
 export function projectMessageRows(rows, rawTarget) {
   const target = validateProjectionTarget(rawTarget);
   const retentionBefore = Date.parse(target.retentionBefore ?? "");
@@ -94,6 +123,7 @@ export function projectMessageRows(rows, rawTarget) {
       Number(row.id) > target.checkpoint
       || Number(row.active ?? 1) === 0
       || Number(row.compacted ?? 0) === 1
+      || normalizeHermesEnvelope(row.content, row.display_kind).envelope
     ))
     .sort((left, right) => Number(left.id) - Number(right.id));
 
@@ -105,7 +135,8 @@ export function projectMessageRows(rows, rawTarget) {
     const sourceMessageId = Number(row.id);
     if (seen.has(sourceMessageId)) continue;
     seen.add(sourceMessageId);
-    const body = redactProjectionContent(row.content);
+    const normalizedEnvelope = normalizeHermesEnvelope(row.content, row.display_kind);
+    const body = redactProjectionContent(normalizedEnvelope.content);
     if (!body) continue;
     if (row.role === "user") {
       const bodySha256 = sha256Hex(body);
@@ -117,7 +148,7 @@ export function projectMessageRows(rows, rawTarget) {
     const seconds = Number(row.timestamp);
     if (!Number.isFinite(seconds) || seconds < 0) continue;
     const sourceTimestamp = new Date(seconds * 1000).toISOString();
-    const lifecycleState = Number(row.active ?? 1) === 0
+    const lifecycleState = Number(row.active ?? 1) === 0 || normalizedEnvelope.infrastructure
       ? "deleted"
       : Number(row.compacted ?? 0) === 1
         ? "archived"
@@ -160,15 +191,25 @@ export function createSqliteProjectionReader({ homeForProfile, sqliteBin = "sqli
       const home = homeForProfile(target.executionProfileId);
       const dbPath = path.join(home, "state.db");
       const lifecycleCheckpoint = target.lifecycleCheckpoint;
+      const lifecycleEligibility = [
+        "active = 0",
+        "compacted = 1",
+        "ltrim(content) like '[CONTEXT COMPACTION%'",
+        "ltrim(content) like '[CONTEXT SUMMARY]:%'",
+        "ltrim(content) like '[Your active task list was preserved across context compression]%'",
+        "ltrim(content) like '[ASYNC DELEGATION BATCH COMPLETE — deleg%'",
+        "ltrim(content) like '[ASYNC DELEGATION COMPLETE — deleg%'",
+        "display_kind = 'hidden'",
+      ].join(" or ");
       const sql = [
         "select id, session_id, role, content, timestamp, active, compacted,",
-        "tool_call_id, tool_calls, tool_name",
+        "tool_call_id, tool_calls, tool_name, display_kind",
         "from messages",
         `where session_id = '${target.hermesSessionId}'`,
         "and role in ('user', 'assistant')",
         "and tool_call_id is null and tool_calls is null and tool_name is null",
         "and typeof(content) = 'text' and length(trim(content)) > 0",
-        `and (id > ${target.checkpoint} or ((active = 0 or compacted = 1) and id <= ${target.checkpoint}))`,
+        `and (id > ${target.checkpoint} or ((${lifecycleEligibility}) and id <= ${target.checkpoint}))`,
         "order by case",
         `when id > ${target.checkpoint} then 0`,
         `when id > ${lifecycleCheckpoint} then 1`,
@@ -191,10 +232,7 @@ export function createSqliteProjectionReader({ homeForProfile, sqliteBin = "sqli
       } catch {
         throw new ProjectionError("Hermes state query returned invalid JSON.", "STATE_DB_INVALID_JSON");
       }
-      const lifecycleRows = rows.filter((row) => (
-        Number(row.id) <= target.checkpoint
-        && (Number(row.active ?? 1) === 0 || Number(row.compacted ?? 0) === 1)
-      ));
+      const lifecycleRows = rows.filter((row) => Number(row.id) <= target.checkpoint);
       return {
         messages: projectMessageRows(rows, target),
         nextLifecycleCheckpoint: lifecycleRows.length

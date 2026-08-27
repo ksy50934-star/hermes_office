@@ -37,6 +37,7 @@ function row(overrides = {}) {
     reasoning_content: null,
     reasoning_details: null,
     api_content: null,
+    display_kind: null,
     display_metadata: null,
     ...overrides,
   };
@@ -74,6 +75,42 @@ test("plain user and assistant content is projected, including convergence tombs
   assert.deepEqual(messages.slice(2).map((message) => message.lifecycleState), ["deleted", "archived"]);
   assert.ok(messages.slice(2).every((message) => message.body === ""));
   assert.ok(messages.every((message) => !JSON.stringify(message).includes("tool payload")));
+});
+
+test("Hermes infrastructure envelopes become body-free convergence tombstones", () => {
+  const projected = projectMessageRows([
+    row({ id: 10, content: "[CONTEXT COMPACTION — REFERENCE ONLY] generated handoff" }),
+    row({ id: 11, content: "[ASYNC DELEGATION BATCH COMPLETE — deleg_test]\ninternal result" }),
+    row({ id: 12, content: "[Your active task list was preserved across context compression]\n- internal task" }),
+    row({ id: 13, content: "hidden metadata row", display_kind: "hidden" }),
+  ], TARGET);
+
+  assert.deepEqual(projected.map((message) => message.sourceMessageId), [10, 11, 12, 13]);
+  assert.ok(projected.every((message) => message.lifecycleState === "deleted"));
+  assert.ok(projected.every((message) => message.body === ""));
+});
+
+test("merged compaction rows preserve only the genuine tail message", () => {
+  const [projected] = projectMessageRows([row({
+    id: 13,
+    role: "assistant",
+    content: "[CONTEXT COMPACTION — REFERENCE ONLY] generated handoff\n--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---\n실제 사용자에게 보낸 답변",
+  })], TARGET);
+
+  assert.equal(projected.lifecycleState, "active");
+  assert.equal(projected.body, "실제 사용자에게 보낸 답변");
+  assert.doesNotMatch(projected.body, /CONTEXT COMPACTION|generated handoff/);
+});
+
+test("merged compaction rows tombstone a synthetic tail envelope", () => {
+  const [projected] = projectMessageRows([row({
+    id: 14,
+    role: "user",
+    content: "[CONTEXT COMPACTION — REFERENCE ONLY] generated handoff\n--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---\n[ASYNC DELEGATION BATCH COMPLETE — deleg_nested]\ninternal result",
+  })], TARGET);
+
+  assert.equal(projected.lifecycleState, "deleted");
+  assert.equal(projected.body, "");
 });
 
 test("projection redacts secrets and local paths without uploading hidden columns", () => {
@@ -191,6 +228,29 @@ test("SQLite projection filters hidden rows before JSON output and reads a bound
   assert.match(sql, new RegExp(`limit ${PROJECTION_BATCH_SIZE}`));
   assert.equal(PROJECTION_BATCH_SIZE, 100);
   assert.equal(invocation.options.maxBuffer, 2 * 1024 * 1024);
+});
+
+test("SQLite lifecycle scan revisits previously projected active infrastructure envelopes", async () => {
+  let sql;
+  const reader = createSqliteProjectionReader({
+    homeForProfile: () => "/safe/profile",
+    execFileImpl: async (_binary, args) => {
+      sql = args.at(-1);
+      return { stdout: JSON.stringify([row({
+        id: 10,
+        content: "[ASYNC DELEGATION BATCH COMPLETE — deleg_old]\ninternal result",
+      })]) };
+    },
+  });
+
+  const batch = await reader.readMessages({ ...TARGET, checkpoint: 100, lifecycleCheckpoint: 0 });
+  assert.equal(batch.nextLifecycleCheckpoint, 10);
+  assert.deepEqual(batch.messages.map((message) => [message.sourceMessageId, message.lifecycleState, message.body]), [
+    [10, "deleted", ""],
+  ]);
+  assert.match(sql, /ASYNC DELEGATION BATCH COMPLETE/);
+  assert.match(sql, /CONTEXT COMPACTION/);
+  assert.match(sql, /active task list was preserved across context compression/);
 });
 
 test("projection failures expose a bounded operational code without message or payload content", async () => {
