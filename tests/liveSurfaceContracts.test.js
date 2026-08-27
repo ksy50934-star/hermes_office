@@ -9,7 +9,8 @@ const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 test("Office and command center do not seed or persist demo mission and approval data", async () => {
   const app = await readFile(path.join(projectRoot, "src", "App.jsx"), "utf8");
   assert.doesNotMatch(app, /INITIAL_MISSIONS|INITIAL_APPROVALS/);
-  assert.match(app, /const \[missions, setMissions\] = useState\(\[\]\)/);
+  // null is the honest loading sentinel; [] means the real board loaded empty.
+  assert.match(app, /const \[missions, setMissions\] = useState\(null\)/);
   assert.match(app, /const board = await hermesFetch\("\/api\/plugins\/kanban\/board"/);
   assert.match(app, /setMissions\(officeMissionsFromBoard\(board\)\)/);
   assert.doesNotMatch(app, /setItem\("hermes-office-missions"/);

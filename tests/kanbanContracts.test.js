@@ -37,10 +37,29 @@ test("command center missions are derived only from official board tasks", () =>
     columns: [{ name: "running", tasks: [{ id: "t1", title: "공식 업무", assignee: "hermes-technology", body }] }],
   });
   assert.equal(missions.length, 1);
-  assert.equal(missions[0].status, "working");
+  // The board's own status, not a second vocabulary layered over it.
+  assert.equal(missions[0].status, "running");
+  assert.equal(missions[0].statusLabel, "진행 중");
+  assert.equal(missions[0].statusTone, "working");
   assert.equal(missions[0].room, "tech");
   assert.equal(missions[0].progress, 100);
+  assert.equal(missions[0].progressBasis, "checklist");
+  assert.equal(missions[0].due, "2026-07-20");
   assert.equal(missions[0].steps[0].label, "검수");
+});
+
+test("board missions carry no invented progress, title or due date", () => {
+  const missions = officeMissionsFromBoard({
+    columns: [{ name: "running", tasks: [{ id: "t1", assignee: "hermes-technology", body: "" }] }],
+  });
+  assert.equal(missions.length, 1);
+  // Running with no checklist is a task nobody has measured.
+  assert.equal(missions[0].progress, null);
+  assert.equal(missions[0].progressBasis, null);
+  assert.equal(missions[0].due, null);
+  assert.equal(missions[0].title, null);
+  assert.equal(missions[0].titleMissing, true);
+  assert.equal(missions[0].objective, null);
 });
 
 test("command center hides tasks soft-deleted into the official archive", () => {

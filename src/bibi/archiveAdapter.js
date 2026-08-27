@@ -1,26 +1,67 @@
-import { deleteConversation, loadMessages } from "../cloud/workspaceClient.js";
+import { createMeetingFollowup, deleteConversation, loadMessages } from "../cloud/workspaceClient.js";
+import {
+  completedCloudMeetings,
+  describeMeetingRecord,
+  meetingFollowupCandidates,
+} from "./meetingLifecycle.js";
 
 function timestampSeconds(value) {
   const millis = Date.parse(value ?? "");
   return Number.isFinite(millis) ? Math.floor(millis / 1000) : 0;
 }
 
-function meetingEntries(meeting) {
-  return (meeting.participants ?? [])
-    .filter((participant) => participant.result)
-    .map((participant) => ({
-      id: participant.result.id,
-      profile: participant.profile_id,
-      kind: "statement",
-      text: participant.result.detail || participant.result.summary || "",
-      pending: false,
-      time: participant.result.created_at,
-      timestamp: timestampSeconds(participant.result.created_at),
-    }))
-    .filter((entry) => entry.text)
-    .sort((left, right) => left.timestamp - right.timestamp);
+/**
+ * The reader's transcript for a completed meeting: one entry per persisted
+ * result and per evidence excerpt, in the order they were written.
+ *
+ * A result's summary and detail are both carried, separately, because they are
+ * two things the profile wrote and neither one is a stand-in for the other.
+ * Nothing is added for a participant that produced nothing — the record panel
+ * says so in its own right, and inventing a placeholder statement would put an
+ * empty result on screen as if it were an answer.
+ */
+function meetingEntries(record) {
+  const entries = [];
+  for (const participant of record.participants) {
+    for (const result of participant.results) {
+      const text = result.detail || result.summary;
+      if (!text) continue;
+      entries.push({
+        id: result.id,
+        profile: participant.profileId,
+        kind: "statement",
+        text,
+        summary: result.summary,
+        detail: result.detail,
+        pending: false,
+        time: result.createdAt,
+        timestamp: timestampSeconds(result.createdAt),
+      });
+    }
+    for (const item of participant.evidence) {
+      if (!item.excerpt) continue;
+      entries.push({
+        id: `${item.id}:evidence`,
+        profile: participant.profileId,
+        kind: "evidence",
+        text: item.excerpt,
+        label: item.label,
+        pending: false,
+        time: item.createdAt,
+        timestamp: timestampSeconds(item.createdAt),
+      });
+    }
+  }
+  return entries.sort((left, right) => left.timestamp - right.timestamp);
 }
 
+/**
+ * The archive holds completed meetings only.
+ *
+ * A running meeting is on the meeting surface, where it can still be joined and
+ * ended; listing it here as well would make one meeting look like two records
+ * and would offer a follow-up button over work that has not finished.
+ */
 export function cloudArchiveView({ archive = [], meetings = [] } = {}) {
   return {
     sessions: archive.map((conversation) => ({
@@ -34,24 +75,54 @@ export function cloudArchiveView({ archive = [], meetings = [] } = {}) {
       archived: Boolean(conversation.archived_at),
       cloud: true,
     })),
-    meetings: meetings.map((meeting) => ({
-      id: meeting.id,
-      topic: meeting.topic,
-      status: meeting.status === "completed" ? "complete" : meeting.status,
-      participants: (meeting.participants ?? []).map((participant) => participant.profile_id),
-      round: 1,
-      updatedAt: Date.parse(meeting.completed_at || meeting.created_at || "") || 0,
-      entries: meetingEntries(meeting),
-      cloud: true,
-    })),
+    meetings: completedCloudMeetings(meetings).map((meeting) => {
+      const record = describeMeetingRecord(meeting);
+      return {
+        id: record.id,
+        topic: record.topic,
+        status: record.status,
+        completionMode: record.completionMode,
+        participants: record.participants.map((participant) => participant.profileId),
+        round: 1,
+        updatedAt: record.updatedAt,
+        entries: meetingEntries(record),
+        record,
+        followupCandidates: meetingFollowupCandidates(record),
+        // Null, and not derived from anything. A cloud meeting produces results
+        // and evidence; it does not produce a decision summary, and this
+        // adapter will not write one on its behalf.
+        outcome: null,
+        cloud: true,
+      };
+    }),
   };
 }
 
-export function createCloudArchiveAdapter({ archive = [], meetings = [], loadMessagesFn = loadMessages, deleteConversationFn = deleteConversation } = {}) {
+export function createCloudArchiveAdapter({
+  archive = [],
+  meetings = [],
+  ownerId = null,
+  followups = new Map(),
+  loadMessagesFn = loadMessages,
+  deleteConversationFn = deleteConversation,
+  createFollowupFn = createMeetingFollowup,
+} = {}) {
   return {
     backend: "bibi-cloud",
+    /** Follow-ups already filed, keyed by their intake idempotency key. */
+    followups,
     async list() {
       return cloudArchiveView({ archive, meetings });
+    },
+    /**
+     * File a follow-up from a span the user picked out of the record.
+     *
+     * The key is deterministic, so a second call for the same selection returns
+     * the work item the first one created and reports it as a duplicate rather
+     * than filing the same sentence twice.
+     */
+    async createFollowup(meeting, candidate) {
+      return createFollowupFn({ ownerId, meetingId: meeting?.id, candidate });
     },
     async loadMessages(session) {
       const rows = await loadMessagesFn(session.id);

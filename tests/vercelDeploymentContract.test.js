@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { ROUTES, routePath } from "../api/index.js";
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -125,13 +126,27 @@ test("the environment example itself stays committable", async () => {
   assert.ok(broadRule !== -1 && negation > broadRule, "the negation must follow the broad rule");
 });
 
-test("every connector endpoint the connector calls exists as a function", async () => {
+test("every connector endpoint is preserved by the single Hobby-safe dispatcher", async () => {
   const transport = await read("connector/outboundTransport.js");
   const routes = [...transport.matchAll(/request\("(\/api\/[^"]+)"/g)].map((match) => match[1]);
   assert.ok(routes.length >= 4, `expected the connector routes, found ${routes.join(", ")}`);
 
   for (const route of routes) {
-    const file = `${route.replace(/^\/api\//, "api/")}.js`;
-    await assert.doesNotReject(read(file), `${route} must be implemented at ${file}`);
+    assert.equal(ROUTES.has(route.replace(/^\/api\//, "")), true, `${route} must be dispatched`);
   }
+  assert.equal(routePath({ query: { path: ["connector", "projection", "upload"] } }), "connector/projection/upload");
+  assert.equal(routePath({ query: { path: "chat/send" } }), "chat/send");
+});
+
+test("the API is one rewritten Vercel function, below the Hobby function limit", async () => {
+  const [dispatcher, configText] = await Promise.all([read("api/index.js"), read("vercel.json")]);
+  const config = JSON.parse(configText);
+  assert.deepEqual(config.rewrites[0], { source: "/api/:path*", destination: "/api?path=:path*" });
+  for (const route of [
+    "chat/send", "chat/binding", "work/transition",
+    "connector/heartbeat", "connector/poll", "connector/report",
+    "connector/lease/renew", "connector/runtime/projection",
+    "connector/projection/targets", "connector/projection/upload",
+    "connector/binding/pending", "connector/binding/verify", "connector/sessions/telegram",
+  ]) assert.match(dispatcher, new RegExp(`\\["${route.replaceAll("/", "\\/")}"`));
 });

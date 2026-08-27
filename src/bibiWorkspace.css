@@ -859,6 +859,16 @@
 .bibi-participant-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:7px; }.bibi-participant-grid label { display:flex; gap:8px; align-items:flex-start; padding:8px; border-radius:9px; background:rgba(0,0,0,.03); }.bibi-participant-grid small { display:block; opacity:.65; }
 .bibi-meeting-list,.bibi-archive-list { display:flex; flex-direction:column; gap:12px; }.bibi-meeting-record>header,.bibi-artifact-card>header,.bibi-archive-list article>header { display:flex; justify-content:space-between; gap:12px; }.bibi-meeting-record h3,.bibi-artifact-card h3 { margin:4px 0; }
 .bibi-meeting-responses { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:8px; margin-top:12px; }.bibi-meeting-responses section { padding:11px; border-radius:10px; background:rgba(0,0,0,.035); }.bibi-meeting-responses h4 { margin:0 0 4px; }.bibi-meeting-responses p { white-space:pre-wrap; }
+.bibi-meeting-list-title { margin:0; font-size:.82rem; letter-spacing:.04em; opacity:.7; text-transform:uppercase; }
+.bibi-meeting-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; padding-top:10px; border-top:1px solid rgba(29,35,32,.1); }.bibi-meeting-actions small { opacity:.6; }
+.bibi-meeting-record-toggle { margin-top:12px; }
+.bibi-meeting-record-panel { display:grid; gap:14px; margin-top:12px; padding-top:12px; border-top:1px solid rgba(29,35,32,.1); }
+.bibi-meeting-record-meta { display:flex; flex-wrap:wrap; gap:8px 20px; margin:0; }.bibi-meeting-record-meta div { min-width:0; }.bibi-meeting-record-meta dt { font-size:.68rem; opacity:.6; }.bibi-meeting-record-meta dd { margin:2px 0; overflow-wrap:anywhere; }
+.bibi-meeting-record-participants { display:grid; gap:10px; }.bibi-meeting-record-participants>section { padding:12px; border-radius:10px; background:rgba(0,0,0,.035); }.bibi-meeting-record-participants h4 { margin:0 0 4px; }.bibi-meeting-record-participants small { display:block; opacity:.65; overflow-wrap:anywhere; }
+.bibi-meeting-result,.bibi-meeting-evidence { display:grid; gap:5px; margin-top:8px; padding:10px; border-radius:9px; background:rgba(255,255,255,.6); }.bibi-meeting-result p,.bibi-meeting-evidence b { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }.bibi-meeting-result pre,.bibi-meeting-evidence pre,.bibi-meeting-evidence code { max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+.bibi-meeting-followup { display:grid; gap:10px; }.bibi-meeting-followup h4 { margin:0; }.bibi-meeting-followup p { margin:0; }
+.bibi-meeting-followup-options { display:grid; gap:7px; max-height:320px; overflow:auto; }.bibi-meeting-followup-options label { display:flex; gap:9px; align-items:flex-start; padding:9px; border-radius:9px; background:rgba(0,0,0,.03); }.bibi-meeting-followup-options span { display:grid; gap:3px; min-width:0; }.bibi-meeting-followup-options small { opacity:.6; }.bibi-meeting-followup-options b { font-weight:500; white-space:pre-wrap; overflow-wrap:anywhere; }
+.bibi-meeting-followup-notice { opacity:.75; }
 .bibi-artifact-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }.bibi-artifact-card dl { display:flex; flex-wrap:wrap; gap:8px 16px; }.bibi-artifact-card dl div { min-width:0; }.bibi-artifact-card dt { font-size:.68rem; opacity:.6; }.bibi-artifact-card dd { margin:2px 0; overflow-wrap:anywhere; }.bibi-artifact-card pre,.bibi-artifact-evidence code { max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }.bibi-artifact-evidence { display:grid; gap:5px; padding:10px; margin-top:8px; background:rgba(0,0,0,.035); border-radius:9px; }.bibi-muted { opacity:.55; }
 
 /* ------------------------------------------------------------------ mobile */
@@ -942,3 +952,98 @@
     min-height: 44px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Telegram bridge
+   ---------------------------------------------------------------------------
+   The panel is deliberately quiet: it sits between the conversation list and
+   the timeline and is read far more often than it is used. The only coloured
+   states are the two that need an action — a refused verification, and a
+   connection that is proved and working. Everything else is text. */
+
+.bibi-telegram-bridge {
+  border: 1px solid rgba(67, 104, 145, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+  background: rgba(67, 104, 145, 0.04);
+}
+
+.bibi-bridge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bibi-bridge-header h3 { margin: 0; font-size: 0.84rem; }
+
+.bibi-bridge-detail { margin: 0; font-size: 0.75rem; line-height: 1.5; opacity: 0.85; }
+
+.bibi-bridge-notice { margin: 0; font-size: 0.72rem; line-height: 1.5; opacity: 0.72; }
+
+.bibi-bridge-facts {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.bibi-bridge-facts > div {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.bibi-bridge-facts dt { font-size: 0.68rem; opacity: 0.6; }
+.bibi-bridge-facts dd { margin: 0; font-size: 0.72rem; overflow-wrap: anywhere; }
+
+.bibi-bridge-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.bibi-bridge-sessions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.bibi-bridge-sessions li div { min-width: 0; display: grid; gap: 2px; }
+.bibi-bridge-sessions li strong { font-size: 0.76rem; }
+.bibi-bridge-sessions li span { font-size: 0.68rem; opacity: 0.7; }
+.bibi-bridge-session-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bibi-bridge-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* A 44px floor on every control here: this panel is used on a phone, and the
+   disconnect button is the one nobody should have to aim for twice. */
+.bibi-telegram-bridge button {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(67, 104, 145, 0.35);
+  background: #fff;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.bibi-telegram-bridge button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.bibi-bridge-disconnect { border-color: rgba(168, 62, 62, 0.4); color: #8f3030; }
+
+.bibi-badge.bibi-bridge-verified { background: rgba(46, 125, 87, 0.14); color: #1f6144; }
+.bibi-badge.bibi-bridge-blocked { background: rgba(168, 62, 62, 0.14); color: #8f3030; }
+.bibi-badge.bibi-bridge-pending { background: rgba(184, 134, 11, 0.16); color: #7a5a06; }
+.bibi-badge.bibi-bridge-none,
+.bibi-badge.bibi-bridge-unbound { background: rgba(90, 100, 112, 0.12); color: #4a545f; }

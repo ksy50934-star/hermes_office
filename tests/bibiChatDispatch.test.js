@@ -525,11 +525,14 @@ test("the browser sends a chat turn through the API, not straight to the table",
   assert.doesNotMatch(send, /\.from\("messages"\)/);
 });
 
-test("the chat send endpoint exists and authenticates the signed-in user", async () => {
-  const route = await readFile(path.join(projectRoot, "api", "chat", "send.js"), "utf8");
-  assert.match(route, /authenticateUser/);
-  assert.match(route, /handleChatSend/);
-  assert.match(route, /METHOD_NOT_ALLOWED/);
+test("the chat send route exists and authenticates the signed-in user", async () => {
+  const [dispatcher, wrappers] = await Promise.all([
+    readFile(path.join(projectRoot, "api", "index.js"), "utf8"),
+    readFile(path.join(projectRoot, "api", "_lib", "route.js"), "utf8"),
+  ]);
+  assert.match(dispatcher, /\["chat\/send", userRoute\(handleChatSend\)\]/);
+  assert.match(wrappers, /authenticateUser/);
+  assert.match(wrappers, /METHOD_NOT_ALLOWED/);
 });
 
 // ---------------------------------------------------------------------------

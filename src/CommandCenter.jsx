@@ -1,7 +1,18 @@
 import { useMemo, useState } from "react";
 import { profileLabel } from "./governance.js";
 import { ROOMS, TEAM_META } from "./officeData.js";
-import { MISSION_STATUS } from "./operationsData.js";
+import {
+  hasMeasuredProgress,
+  missionDueLabel,
+  missionOwnerLabel,
+  missionProgressLabel,
+  missionProgressPercent,
+  missionStatusLabel,
+  missionStatusTone,
+  missionSummary,
+  missionTitle,
+  missionUpdatedLabel,
+} from "./missionView.js";
 
 function AgentAvatar({ profileName, online = false }) {
   const meta = TEAM_META[profileName] ?? {
@@ -19,7 +30,7 @@ function AgentAvatar({ profileName, online = false }) {
 
 function MissionCard({ mission, selected, onSelect }) {
   const owner = TEAM_META[mission.owner];
-  const status = MISSION_STATUS[mission.status];
+  const percent = missionProgressPercent(mission);
   return (
     <button
       type="button"
@@ -27,17 +38,21 @@ function MissionCard({ mission, selected, onSelect }) {
       onClick={() => onSelect(mission.id)}
     >
       <div className="mission-card-top">
-        <span className={`status-pill ${status.tone}`}>{status.label}</span>
-        <small>{mission.due}</small>
+        <span className={`status-pill ${missionStatusTone(mission)}`}>{missionStatusLabel(mission)}</span>
+        <small>{missionUpdatedLabel(mission)}</small>
       </div>
-      <strong>{mission.title}</strong>
-      <p>{mission.objective}</p>
-      <div className="mission-progress">
-        <span style={{ width: `${mission.progress}%` }} />
-      </div>
+      <strong className={mission.titleMissing ? "mission-title-missing" : ""}>{missionTitle(mission)}</strong>
+      <p>{missionSummary(mission)}</p>
+      {/* The bar is drawn only when a checklist measured it. Without one an
+          empty bar would read as "0% done" rather than "never measured". */}
+      {percent != null && (
+        <div className="mission-progress">
+          <span style={{ width: `${percent}%` }} />
+        </div>
+      )}
       <div className="mission-card-bottom">
-        <span>{owner?.name ?? mission.owner}</span>
-        <b>{mission.progress}%</b>
+        <span>{missionOwnerLabel(mission, owner?.name)}</span>
+        <b>{missionProgressLabel(mission)}</b>
       </div>
     </button>
   );
@@ -57,18 +72,17 @@ function MissionDetail({ mission, sessions, onToggleStep, onOpenRoom, onContinue
   const [deleting, setDeleting] = useState(false);
   const owner = TEAM_META[mission.owner];
   const room = ROOMS.find((item) => item.id === mission.room);
-  const status = MISSION_STATUS[mission.status];
   const session = latestMissionSession(mission, sessions);
   return (
     <section className="mission-detail">
       <div className="panel-heading">
         <div>
           <span>ACTIVE MISSION</span>
-          <h3>{mission.title}</h3>
+          <h3>{missionTitle(mission)}</h3>
         </div>
-        <span className={`status-pill ${status.tone}`}>{status.label}</span>
+        <span className={`status-pill ${missionStatusTone(mission)}`}>{missionStatusLabel(mission)}</span>
       </div>
-      <p>{mission.objective}</p>
+      <p>{missionSummary(mission)}</p>
       <div className="mission-owner-row">
         <AgentAvatar profileName={mission.owner} online />
         <div>
@@ -81,7 +95,11 @@ function MissionDetail({ mission, sessions, onToggleStep, onOpenRoom, onContinue
         </div>
         <div>
           <small>기한</small>
-          <strong>{mission.due}</strong>
+          <strong>{missionDueLabel(mission)}</strong>
+        </div>
+        <div>
+          <small>진행</small>
+          <strong>{missionProgressLabel(mission)}</strong>
         </div>
       </div>
       <div className="mission-checklist">
@@ -243,10 +261,14 @@ export default function CommandCenter({
     [workspace?.profiles],
   );
   const onlineCount = profiles.filter((profile) => profile.gateway_running).length;
-  const workingCount = missions.filter((mission) => mission.status === "working").length;
-  const completion = missions.length
-    ? Math.round(missions.reduce((sum, mission) => sum + mission.progress, 0) / missions.length)
-    : 0;
+  const workingCount = missions.filter((mission) => mission.active).length;
+  // Averaged over the missions that were actually measured. Treating an
+  // unmeasured mission as 0% dragged the whole figure down to a number that
+  // described nothing.
+  const measured = missions.filter(hasMeasuredProgress);
+  const completion = measured.length
+    ? Math.round(measured.reduce((sum, mission) => sum + missionProgressPercent(mission), 0) / measured.length)
+    : null;
   const visibleAgents = useMemo(
     () => profiles.slice(0, 7),
     [profiles],
@@ -283,8 +305,12 @@ export default function CommandCenter({
         </article>
         <article>
           <span>MISSION HEALTH</span>
-          <strong>{completion}<em>%</em></strong>
-          <small>전체 미션 평균 진행률</small>
+          {/* Null means no mission carried a checklist, so no percentage exists
+              to average. Printing 0% there claimed nothing had been done. */}
+          <strong>{completion == null ? "측정 없음" : <>{completion}<em>%</em></>}</strong>
+          <small>{completion == null
+            ? "체크리스트가 있는 업무가 없어 진행률을 계산할 수 없습니다"
+            : `체크리스트가 있는 ${measured.length}건 평균 진행률`}</small>
         </article>
       </section>
 

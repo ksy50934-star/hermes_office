@@ -20,6 +20,12 @@ import { createLeaseRunner } from "./leaseRunner.js";
 import { createProjectionRunner, createSqliteProjectionReader } from "./messageProjection.js";
 import { createOutboundTransport } from "./outboundTransport.js";
 import { createRuntimeProjectionCollector, createRuntimeProjectionRunner } from "./runtimeProjection.js";
+import { createSqliteSessionVerifier } from "./sessionBinding.js";
+import {
+  createBindingVerificationRunner,
+  createSqliteTelegramSessionReader,
+  createTelegramSessionDiscoveryRunner,
+} from "./telegramSessions.js";
 
 function log(message, detail = {}) {
   // The config object is safe to spread into a log line: its token is
@@ -42,6 +48,24 @@ export async function main(env = process.env) {
     transport,
     collector: createRuntimeProjectionCollector(config),
     listProfileIds: () => executor.listProfileIds(),
+  });
+  // Discovery and verification share one reader: the picker the owner chooses
+  // from and the proof the binding is verified against have to be the same view
+  // of the same `state.db`, or the UI could offer a session the verifier then
+  // refuses.
+  const telegramSessionReader = createSqliteTelegramSessionReader({
+    homeForProfile: (executionProfileId) => homeForExecutionProfile(executionProfileId, config),
+  });
+  const telegramDiscoveryRunner = createTelegramSessionDiscoveryRunner({
+    transport,
+    reader: telegramSessionReader,
+    listProfileIds: () => executor.listProfileIds(),
+  });
+  const bindingVerificationRunner = createBindingVerificationRunner({
+    transport,
+    reader: telegramSessionReader,
+    sessionVerifier: createSqliteSessionVerifier(),
+    homeForProfile: (executionProfileId) => homeForExecutionProfile(executionProfileId, config),
   });
 
   log("connector started", {
@@ -75,6 +99,14 @@ export async function main(env = process.env) {
     if (!config.dryRun) {
       const runtimeProjection = await runtimeProjectionRunner.runOnce();
       if (runtimeProjection.projected || runtimeProjection.failed) log("runtime projection cycle", runtimeProjection);
+      // Both of these read `state.db` and nothing else, so they stay behind the
+      // same opt-in that gates every other look at the local profiles.
+      const discovery = await telegramDiscoveryRunner.runOnce();
+      if (discovery.scanned || discovery.failed) log("telegram discovery cycle", discovery);
+      const verification = await bindingVerificationRunner.runOnce();
+      if (verification.verified || verification.refused || verification.failed) {
+        log("binding verification cycle", verification);
+      }
     }
     const summary = await runner.runOnce();
     if (!summary.online) {

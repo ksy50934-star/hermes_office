@@ -29,12 +29,12 @@ export const OFFICE_FLOOR_ZONES = [
   { id: "executive", label: "대표실", x: 1.9, y: 2.0, w: 12.2, h: 22.2, marker: [7.0, 22.0], tone: "executive", furniture: "desk", agentSlots: [[3.6, 21.5], [7.0, 22.0], [11.7, 21.5]] },
   { id: "meeting", label: "회의실", x: 19.0, y: 29.0, w: 61.8, h: 38.0, marker: [49.5, 48.0], tone: "meeting", furniture: "meeting" },
   { id: "operations", label: "운영실", x: 14.3, y: 2.0, w: 25.4, h: 22.2, marker: [27.0, 22.0], tone: "operations", furniture: "desk", agentSlots: [[17.0, 22.0], [27.0, 22.0], [37.0, 22.0]] },
-  { id: "control", label: "관제센터", x: 60.3, y: 2.0, w: 25.2, h: 22.2, marker: [72.8, 22.0], tone: "control", furniture: "monitors" },
+  { id: "control", label: "관제센터", x: 60.3, y: 2.0, w: 25.2, h: 22.2, marker: [72.8, 22.0], tone: "control", furniture: "monitors", agentSlots: [[63.0, 22.0], [72.8, 22.0], [82.0, 22.0]] },
   { id: "brand", label: "브랜드룸", x: 1.8, y: 25.0, w: 8.0, h: 17.0, marker: [8.8, 34.0], tone: "brand", furniture: "table", agentSlots: [[8.8, 29.0], [8.8, 34.0], [8.8, 39.0]] },
   { id: "content", label: "콘텐츠룸", x: 1.8, y: 43.0, w: 8.0, h: 27.0, marker: [8.8, 55.0], tone: "content", furniture: "workbench", agentSlots: [[8.8, 47.0], [8.8, 55.0], [8.8, 63.0]] },
   { id: "creative", label: "크리에이티브룸", x: 1.8, y: 70.0, w: 38.3, h: 28.0, marker: [22.0, 72.0], tone: "creative", furniture: "desk", agentSlots: [[5.0, 72.0], [14.0, 72.0], [23.0, 72.0], [36.0, 72.0]] },
   { id: "desk", label: "내 책상", x: 39.5, y: 2.0, w: 20.8, h: 22.2, marker: [50.0, 22.0], tone: "executive", furniture: "desk" },
-  { id: "library", label: "자료실", x: 39.5, y: 70.0, w: 23.2, h: 28.0, marker: [51.0, 72.0], tone: "library", furniture: "shelves" },
+  { id: "library", label: "자료실", x: 39.5, y: 70.0, w: 23.2, h: 28.0, marker: [51.0, 72.0], tone: "library", furniture: "shelves", agentSlots: [[43.0, 72.0], [51.0, 72.0], [59.0, 72.0]] },
   { id: "customer", label: "고객 데스크", x: 89.5, y: 25.0, w: 8.7, h: 45.0, marker: [90.5, 48.0], tone: "customer", furniture: "round", agentSlots: [[90.5, 30.0], [90.5, 41.0], [90.5, 52.0], [90.5, 63.0]] },
   { id: "tech", label: "기술실", x: 64.0, y: 70.0, w: 34.2, h: 28.0, marker: [80.0, 72.0], tone: "control", furniture: "monitors", agentSlots: [[67.0, 72.0], [79.0, 72.0], [91.0, 72.0]] },
   { id: "finance", label: "재무실", x: 85.5, y: 2.0, w: 12.7, h: 22.2, marker: [92.0, 22.0], tone: "finance", furniture: "desk", agentSlots: [[87.0, 22.0], [92.0, 22.0], [96.0, 22.0]] },
@@ -257,12 +257,22 @@ export const ROOMS = [
   },
 ];
 
+/**
+ * Zones a member can be seated in, mirroring `ORGANIZATION_ROOMS`. 관제센터 and
+ * 자료실 are seatable: they are real zones with real bounds, and `roomSeatSlots`
+ * lays their seats out inside those bounds, so no zone coordinate changes.
+ *
+ * 회의실 and 내 책상 stay out — 회의실 is occupied only for the length of a
+ * meeting, and 내 책상 is the user's own seat, not an agent's.
+ */
 const OFFICE_ASSIGNABLE_ROOM_IDS = [
   "executive",
   "operations",
+  "control",
   "brand",
   "content",
   "creative",
+  "library",
   "customer",
   "tech",
   "finance",

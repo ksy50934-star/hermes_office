@@ -25,6 +25,28 @@ function unwrap(result, context) {
   return result.data;
 }
 
+/**
+ * Turn a binding RPC failure into a code the handlers can map to a status.
+ *
+ * The database is where these rules actually live — the guard trigger, the
+ * identity match, the owner scoping — so the error text it raises is the
+ * authority. Anything unrecognised keeps its message and becomes a 500 rather
+ * than being reported as a client mistake.
+ */
+function mapBindingError(error) {
+  const message = String(error?.message ?? "");
+  const mapped = new Error(message);
+  if (/no_data_found|not found for owner/i.test(message)) mapped.code = "BINDING_NOT_FOUND";
+  else if (/already bound to another conversation/i.test(message)) mapped.code = "BINDING_CONFLICT";
+  else if (/identity mismatch/i.test(message)) mapped.code = "BINDING_IDENTITY_MISMATCH";
+  else if (/requires the authenticated connector|may only be created pending|requires connector proof/i.test(message)) {
+    mapped.code = "BINDING_VERIFICATION_FORBIDDEN";
+  } else if (/only a pending binding|identity is incomplete|only telegram bindings|needs a reason code/i.test(message)) {
+    mapped.code = "BINDING_INVALID_REQUEST";
+  } else if (/duplicate key|unique/i.test(message)) mapped.code = "BINDING_CONFLICT";
+  return mapped;
+}
+
 export function createWorkspaceStore(supabase) {
   return {
     async findConnectorCredential(tokenHash) {
@@ -107,7 +129,9 @@ export function createWorkspaceStore(supabase) {
           .select("id, conversation_id, organization_profile_id, execution_profile_id, hermes_session_id, channel")
           .eq("owner_id", ownerId)
           .eq("channel", "telegram")
-          .eq("binding_state", "verified"),
+          .eq("binding_state", "verified")
+          .not("verified_at", "is", null)
+          .not("verified_by_node_id", "is", null),
         "listProjectionTargets.bindings",
       ) ?? [];
       if (!bindings.length) return [];
@@ -152,6 +176,136 @@ export function createWorkspaceStore(supabase) {
         checkpoint: checkpointByBinding.get(binding.id) ?? 0,
         canonicalLinks: linksByBinding.get(binding.id) ?? [],
       }));
+    },
+
+    /**
+     * The bindings waiting on proof, with the identity the connector has to
+     * confirm. Owner-scoped like everything else here, and restricted to
+     * `pending`: a verified binding needs nothing, and a blocked one is waiting
+     * on the owner to retry rather than on the Mac.
+     */
+    async listPendingBindings({ ownerId }) {
+      const rows = unwrap(
+        await supabase
+          .from("conversation_bindings")
+          .select("id, conversation_id, organization_profile_id, execution_profile_id, channel, channel_account_id, external_conversation_id, hermes_session_id, created_at")
+          .eq("owner_id", ownerId)
+          .eq("channel", "telegram")
+          .eq("binding_state", "pending")
+          .order("created_at", { ascending: true })
+          .limit(100),
+        "listPendingBindings",
+      ) ?? [];
+      return rows.map((row) => ({
+        bindingId: row.id,
+        conversationId: row.conversation_id,
+        organizationProfileId: row.organization_profile_id,
+        executionProfileId: row.execution_profile_id,
+        channel: row.channel,
+        channelAccountId: row.channel_account_id,
+        externalConversationId: row.external_conversation_id,
+        hermesSessionId: row.hermes_session_id,
+        createdAt: row.created_at,
+      }));
+    },
+
+    /**
+     * Ask for a binding. The RPC creates it `pending` and nothing else; there is
+     * no argument here that could make it verified.
+     */
+    async requestConversationBinding({
+      ownerId, conversationId, channel, channelAccountId,
+      externalConversationId, hermesSessionId, clientRequestId,
+    }) {
+      const { data, error } = await supabase.rpc("bibi_request_conversation_binding", {
+        p_owner_id: ownerId,
+        p_conversation_id: conversationId,
+        p_channel: channel,
+        p_channel_account_id: channelAccountId,
+        p_external_conversation_id: externalConversationId,
+        p_hermes_session_id: hermesSessionId,
+        p_client_request_id: clientRequestId ?? null,
+      });
+      if (error) throw mapBindingError(error);
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        bindingId: row?.binding_id ?? null,
+        bindingState: row?.binding_state ?? null,
+        duplicate: Boolean(row?.duplicate),
+        retried: Boolean(row?.retried),
+      };
+    },
+
+    async cancelConversationBinding({ ownerId, bindingId, reason }) {
+      const { data, error } = await supabase.rpc("bibi_cancel_conversation_binding", {
+        p_owner_id: ownerId,
+        p_binding_id: bindingId,
+        p_reason: reason ?? null,
+      });
+      if (error) throw mapBindingError(error);
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        bindingId: row?.binding_id ?? null,
+        bindingState: row?.binding_state ?? null,
+        alreadyUnbound: Boolean(row?.already_unbound),
+      };
+    },
+
+    async verifyConversationBinding({
+      ownerId, connectorNodeId, bindingId, channelAccountId,
+      externalConversationId, hermesSessionId, executionProfileId, evidence,
+    }) {
+      const { data, error } = await supabase.rpc("bibi_verify_conversation_binding", {
+        p_owner_id: ownerId,
+        p_connector_node_id: connectorNodeId,
+        p_binding_id: bindingId,
+        p_channel_account_id: channelAccountId,
+        p_external_conversation_id: externalConversationId,
+        p_hermes_session_id: hermesSessionId,
+        p_execution_profile_id: executionProfileId,
+        p_evidence: evidence ?? {},
+      });
+      if (error) throw mapBindingError(error);
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        bindingId: row?.binding_id ?? null,
+        bindingState: row?.binding_state ?? null,
+        duplicate: Boolean(row?.duplicate),
+      };
+    },
+
+    async failConversationBinding({ ownerId, connectorNodeId, bindingId, code, detail }) {
+      const { data, error } = await supabase.rpc("bibi_fail_conversation_binding", {
+        p_owner_id: ownerId,
+        p_connector_node_id: connectorNodeId,
+        p_binding_id: bindingId,
+        p_code: code,
+        p_detail: detail ?? null,
+      });
+      if (error) throw mapBindingError(error);
+      const row = Array.isArray(data) ? data[0] : data;
+      return { bindingId: row?.binding_id ?? null, bindingState: row?.binding_state ?? null };
+    },
+
+    async recordTelegramSessionScan({
+      ownerId, connectorNodeId, organizationProfileId, executionProfileId,
+      sessions, scanError, scannedAt,
+    }) {
+      const { data, error } = await supabase.rpc("bibi_record_telegram_session_scan", {
+        p_owner_id: ownerId,
+        p_connector_node_id: connectorNodeId,
+        p_organization_profile_id: organizationProfileId,
+        p_execution_profile_id: executionProfileId,
+        p_sessions: sessions,
+        p_scan_error: scanError ?? null,
+        p_scanned_at: scannedAt,
+      });
+      if (error) throw new Error(`recordTelegramSessionScan: ${error.message}`);
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        sessionCount: Number(row?.session_count ?? 0),
+        eligibleCount: Number(row?.eligible_count ?? 0),
+      };
     },
 
     async applyProjection({ ownerId, target, messages }) {

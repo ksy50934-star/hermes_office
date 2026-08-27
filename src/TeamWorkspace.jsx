@@ -5,7 +5,9 @@ import {
   addOrganizationNode,
   buildDefaultOrganizationNodes,
   moveOrganizationNode,
+  organizationDepartmentLabel,
   organizationDescendants,
+  organizationMemberFunction,
   organizationReportingContext,
   organizationVisibleNodeIds,
   removeOrganizationNode,
@@ -110,16 +112,11 @@ function ProfileAvatar({ meta, className = "", online = false }) {
 function DepartmentIcon({ id }) {
   const content = {
     all: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
-    leadership: <><circle cx="12" cy="12" r="7" /><path d="m12 8 2 4-2 4-2-4 2-4Z" /></>,
-    operations: <><path d="M7 6h12M7 12h12M7 18h12" /><path d="m3.5 6 .8.8L6 5M3.5 12l.8.8L6 11M3.5 18l.8.8L6 17" /></>,
-    brand: <path d="m12 3 8 9-8 9-8-9 8-9Z" />,
-    growth: <><path d="M4 19V5M4 19h16" /><path d="m7 15 4-4 3 2 5-6" /></>,
-    content: <><path d="M6 3h9l3 3v15H6Z" /><path d="M14 3v4h4M9 12h6M9 16h6" /></>,
-    creative: <><path d="m12 3 1.4 4.2L18 9l-4.2 1.4L12 15l-1.4-4.2L6 9l4.2-1.4L12 3Z" /><path d="m18 15 .7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7L18 15Z" /></>,
-    customer: <><path d="M5 17h-2v-5a9 9 0 0 1 18 0v5h-2" /><path d="M5 13h3v6H5ZM16 13h3v6h-3ZM16 20h-4" /></>,
-    finance: <><path d="M5 20V10M10 20V5M15 20v-8M20 20V8" /><path d="M3 20h19" /></>,
-    technology: <><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" /></>,
-    general: <><circle cx="12" cy="6" r="2.5" /><circle cx="6" cy="17" r="2.5" /><circle cx="18" cy="17" r="2.5" /><path d="m10.8 8.2-3.6 6.6M13.2 8.2l3.6 6.6M8.5 17h7" /></>,
+    management: <><circle cx="12" cy="12" r="7" /><path d="m12 8 2 4-2 4-2-4 2-4Z" /></>,
+    execution: <><path d="M7 6h12M7 12h12M7 18h12" /><path d="m3.5 6 .8.8L6 5M3.5 12l.8.8L6 11M3.5 18l.8.8L6 17" /></>,
+    review: <><path d="M12 3l7 3v6c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6l7-3Z" /><path d="m9 12 2 2 4-4" /></>,
+    support: <><path d="M5 17h-2v-5a9 9 0 0 1 18 0v5h-2" /><path d="M5 13h3v6H5ZM16 13h3v6h-3ZM16 20h-4" /></>,
+    recurring: <><path d="M20 12a8 8 0 1 1-2.4-5.7" /><path d="M20 4v4h-4" /><path d="M12 8v4l2.5 1.8" /></>,
   }[id] ?? null;
   return <svg viewBox="0 0 24 24" aria-hidden="true">{content}</svg>;
 }
@@ -156,8 +153,11 @@ function HierarchyBranch({
   const profile = profileMap.get(node.id) ?? { name: node.id, description: "현재 Hermes에 로드되지 않은 프로필" };
   const meta = resolveProfileMeta(profile);
   const activity = activities[node.id] ?? {};
-  const department = ORGANIZATION_DEPARTMENTS.find((item) => item.id === node.department)?.label ?? "공통";
+  const department = organizationDepartmentLabel(node.department);
   const room = ORGANIZATION_ROOMS.find((item) => item.id === node.roomId)?.label ?? "운영실";
+  // The chart states what the seat does here. For 마케터비비 that is review and
+  // feedback, so the roster title is not allowed to read as a production role.
+  const memberFunction = organizationMemberFunction(node.id) || meta.role;
   const children = sortNodes(nodes.filter((item) => item.parentId === node.id && visibleNodeIds.has(item.id)));
   const managerNode = nodes.find((item) => item.id === node.parentId);
   const managerMeta = managerNode ? resolveProfileMeta(profileMap.get(managerNode.id) ?? managerNode.id) : null;
@@ -174,7 +174,7 @@ function HierarchyBranch({
         aria-level={depth}
         aria-selected={selectedId === node.id}
         aria-expanded={children.length ? true : undefined}
-        aria-label={`${meta.name}, ${meta.role}, ${room}. ${editing ? "선택하거나 드래그하여 보고선을 변경" : "선택하여 운영 상태 확인"}`}
+        aria-label={`${meta.name}, ${department}, ${memberFunction}, ${room}. ${editing ? "선택하거나 드래그하여 보고선을 변경" : "선택하여 운영 상태 확인"}`}
         onClick={() => {
           if (editing && draggedId && draggedId !== node.id) onDrop(node.id);
           else onSelect(node.id);
@@ -202,7 +202,7 @@ function HierarchyBranch({
           <span>
             <small>{department}</small>
             <strong>{meta.name}</strong>
-            <em>{meta.role}</em>
+            <em>{memberFunction}</em>
           </span>
         </div>
         <footer>
@@ -254,7 +254,19 @@ function HierarchyBranch({
 }
 
 function OrganizationHierarchy({ profiles, activities, missions, organization, status, error, onSave, onChat, onOpenOffice, activeProfileId, onSelectProfile }) {
-  const persistedNodes = organization?.nodes ?? EMPTY_ORGANIZATION_NODES;
+  // A chart stored under the v1 departments is migrated for display straight
+  // away, so the filters and counts are right on the first paint instead of
+  // waiting for the durable rewrite to land. An unreadable chart is shown as
+  // stored and surfaces through the normal validation error instead.
+  const persistedNodes = useMemo(() => {
+    const stored = organization?.nodes ?? EMPTY_ORGANIZATION_NODES;
+    if (!stored.length) return EMPTY_ORGANIZATION_NODES;
+    try {
+      return validateOrganizationNodes(stored);
+    } catch {
+      return stored;
+    }
+  }, [organization?.nodes]);
   const [draftNodes, setDraftNodes] = useState(EMPTY_ORGANIZATION_NODES);
   const [editing, setEditing] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState("all");
@@ -289,7 +301,7 @@ function OrganizationHierarchy({ profiles, activities, missions, organization, s
   const selectedMissions = selectedNode ? (missions ?? []).filter((mission) => mission.owner === selectedNode.id) : [];
   const selectedActivity = selectedNode ? activities[selectedNode.id] ?? {} : {};
   const selectedRoom = selectedNode ? ORGANIZATION_ROOMS.find((room) => room.id === selectedNode.roomId) : null;
-  const selectedDepartmentMeta = selectedNode ? ORGANIZATION_DEPARTMENTS.find((department) => department.id === selectedNode.department) : null;
+  const selectedFunction = selectedNode ? organizationMemberFunction(selectedNode.id) || selectedMeta?.role : "";
   const reporting = selectedNode
     ? organizationReportingContext(nodes, selectedNode.id)
     : { managerId: null, directReportIds: [], escalationPathIds: [], depth: 0 };
@@ -349,7 +361,7 @@ function OrganizationHierarchy({ profiles, activities, missions, organization, s
     try {
       const next = addOrganizationNode(nodes, effectiveAddProfileId, {
         parentId: selectedNode?.id ?? roots[0]?.id ?? null,
-        department: selectedNode?.department ?? "general",
+        department: selectedNode?.department,
         roomId: selectedNode?.roomId ?? "operations",
       });
       if (await commit(next)) selectNode(effectiveAddProfileId);
@@ -523,7 +535,7 @@ function OrganizationHierarchy({ profiles, activities, missions, organization, s
             <div>
               <small>{editing ? "STRUCTURE EDITOR" : "MEMBER BRIEF"}</small>
               <strong>{selectedMeta ? selectedMeta.name : "구성원을 선택하세요"}</strong>
-              <p>{selectedMeta ? selectedMeta.role : "조직도에서 구성원을 선택하면 보고선과 운영 범위를 확인할 수 있습니다."}</p>
+              <p>{selectedMeta ? selectedFunction : "조직도에서 구성원을 선택하면 보고선과 운영 범위를 확인할 수 있습니다."}</p>
             </div>
             <button type="button" className="organization-inspector-close" aria-label="구성원 상세 닫기" onClick={() => setInspectorOpen(false)}>×</button>
           </div>
@@ -605,7 +617,7 @@ function OrganizationHierarchy({ profiles, activities, missions, organization, s
                 </div>
               </section>
               <div className="organization-live-facts">
-                <span><small>부서</small><strong>{selectedDepartmentMeta?.label ?? "공통"}</strong></span>
+                <span><small>부서</small><strong>{organizationDepartmentLabel(selectedNode.department)}</strong></span>
                 <span><small>오피스</small><strong>{selectedRoom?.label ?? "운영실"}</strong></span>
                 <span><small>업무</small><strong>{selectedMissions.length}건</strong></span>
               </div>

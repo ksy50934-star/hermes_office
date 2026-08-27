@@ -4427,52 +4427,77 @@ main { min-width: 0; }
   cursor: pointer;
 }
 
-.cloud-execution-console { overflow: auto; padding: clamp(16px, 2.4vw, 34px); color: #e7eadf; background: radial-gradient(circle at 90% 0, #173b30 0, transparent 35%), #071512; }
-.cloud-console-header { display: flex; justify-content: space-between; gap: 28px; padding-bottom: 22px; border-bottom: 1px solid #29443a; }
-.cloud-console-header span { color: #88b9a5; font: 10px IBM Plex Mono; letter-spacing: .16em; }
-.cloud-console-header h2 { margin: 7px 0; font-size: clamp(22px, 3vw, 36px); }
-.cloud-console-header p { max-width: 760px; margin: 0; color: #9fb0a9; font-size: 12px; line-height: 1.7; }
-.cloud-console-health { align-self: flex-start; padding: 7px 10px; border: 1px solid #4b635a; border-radius: 999px; color: #b9c4bf; font: 9px IBM Plex Mono; text-transform: uppercase; }
-.cloud-console-health.is-online { color: #b9e5c8; border-color: #478362; background: #254d39; }
-.cloud-console-health.is-offline { color: #ffd0c2; border-color: #814d42; background: #4b2923; }
-.cloud-console-composer { display: grid; grid-template-columns: minmax(170px, .7fr) minmax(240px, 1.3fr); gap: 12px; margin: 22px 0 12px; padding: 18px; border: 1px solid #29443a; border-radius: 12px; background: #0d211b; }
-.cloud-console-composer label { display: grid; gap: 7px; color: #9fb0a9; font-size: 10px; }
-.cloud-console-composer select, .cloud-console-composer input, .cloud-console-composer textarea { min-width: 0; padding: 11px 12px; border: 1px solid #375449; border-radius: 6px; color: #e7eadf; background: #071512; font: 12px inherit; }
-.cloud-console-composer select:focus, .cloud-console-composer input:focus, .cloud-console-composer textarea:focus { outline: 2px solid #6c9b87; outline-offset: 1px; }
-.cloud-console-brief { grid-column: 1 / -1; }
-.cloud-console-brief textarea { min-height: 110px; resize: vertical; line-height: 1.6; }
-.cloud-console-composer button { min-height: 44px; justify-self: end; grid-column: 1 / -1; padding: 0 18px; border: 1px solid #7aaa94; border-radius: 6px; color: #071512; background: #a9cfb8; font-weight: 700; cursor: pointer; }
-.cloud-console-composer button:disabled { opacity: .42; cursor: not-allowed; }
-.cloud-console-notice { margin: 10px 0 18px; color: #d4c39a; font-size: 11px; }
-.cloud-console-grid { display: grid; grid-template-columns: minmax(320px, .85fr) minmax(380px, 1.15fr); gap: 14px; }
-.cloud-console-grid > section { min-height: 360px; padding: 16px; border: 1px solid #29443a; border-radius: 10px; background: #0b1c17; }
-.cloud-console-grid h3 { margin: 0 0 14px; font-size: 13px; }
-.cloud-console-list { display: grid; gap: 7px; }
-.cloud-console-row { display: grid; grid-template-columns: 66px minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; width: 100%; padding: 11px; border: 1px solid #29443a; border-radius: 6px; color: #dce3dd; background: #10251e; text-align: left; cursor: pointer; }
-.cloud-console-row:hover, .cloud-console-row:focus-visible { border-color: #729682; outline: none; }
-.cloud-console-row span, .cloud-console-row time { color: #7f978d; font: 9px IBM Plex Mono; }
-.cloud-console-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.cloud-console-row em { padding: 3px 6px; border-radius: 999px; color: #d9c59a; background: #493c20; font: normal 8px IBM Plex Mono; }
-.cloud-console-row em.is-succeeded { color: #b9e5c8; background: #254d39; }
-.cloud-console-row em.is-failed, .cloud-console-row em.is-blocked { color: #ffd0c2; background: #4b2923; }
-.cloud-console-row time { grid-column: 2 / -1; }
-.cloud-console-empty { color: #7f978d; font-size: 11px; }
-.cloud-console-detail h4 { margin: 8px 0; font-size: 17px; }
-.cloud-console-detail > p { color: #a9b7b1; font-size: 11px; line-height: 1.7; }
-.cloud-console-detail dl { display: flex; gap: 16px; }
-.cloud-console-detail dl div { display: flex; gap: 7px; font-size: 10px; }
-.cloud-console-detail dt { color: #7f978d; }
-.cloud-console-detail article { margin-top: 12px; padding: 12px; border: 1px solid #29443a; background: #071512; }
-.cloud-console-detail article > strong { color: #88b9a5; font: 9px IBM Plex Mono; }
-.cloud-console-detail pre { max-height: 260px; overflow: auto; margin: 9px 0 0; color: #cdd7d1; font: 10px/1.6 IBM Plex Mono; white-space: pre-wrap; word-break: break-word; }
-.cloud-console-detail ol { display: grid; gap: 7px; padding-left: 18px; color: #9fb0a9; font-size: 10px; }
-.cloud-console-detail li span { margin-left: 8px; color: #6f877c; font: 9px IBM Plex Mono; }
+.execution-control { overflow: auto; padding: clamp(16px, 2.4vw, 34px); color: #e7eadf; background: radial-gradient(circle at 90% 0, #173b30 0, transparent 35%), #071512; }
+.execution-control-header { display: flex; justify-content: space-between; gap: 28px; padding-bottom: 22px; border-bottom: 1px solid #29443a; }
+.execution-control-header span { color: #88b9a5; font: 10px IBM Plex Mono; letter-spacing: .16em; }
+.execution-control-header h2 { margin: 7px 0; font-size: clamp(22px, 3vw, 36px); }
+.execution-control-header p { max-width: 760px; margin: 0; color: #9fb0a9; font-size: 12px; line-height: 1.7; }
+.execution-control-health { align-self: flex-start; padding: 7px 10px; border: 1px solid #4b635a; border-radius: 999px; color: #b9c4bf; font: 9px IBM Plex Mono; text-transform: uppercase; }
+.execution-control-health.is-online { color: #b9e5c8; border-color: #478362; background: #254d39; }
+.execution-control-health.is-offline { color: #ffd0c2; border-color: #814d42; background: #4b2923; }
+.execution-control-composer { display: grid; grid-template-columns: minmax(170px, .7fr) minmax(240px, 1.3fr); gap: 12px; margin: 22px 0 12px; padding: 18px; border: 1px solid #29443a; border-radius: 12px; background: #0d211b; }
+.execution-control-composer label { display: grid; gap: 7px; color: #9fb0a9; font-size: 10px; }
+.execution-control-composer select, .execution-control-composer input, .execution-control-composer textarea { min-width: 0; padding: 11px 12px; border: 1px solid #375449; border-radius: 6px; color: #e7eadf; background: #071512; font: 12px inherit; }
+.execution-control-composer select:focus, .execution-control-composer input:focus, .execution-control-composer textarea:focus { outline: 2px solid #6c9b87; outline-offset: 1px; }
+.execution-control-brief { grid-column: 1 / -1; }
+.execution-control-brief textarea { min-height: 110px; resize: vertical; line-height: 1.6; }
+.execution-control-composer button { min-height: 44px; justify-self: end; grid-column: 1 / -1; padding: 0 18px; border: 1px solid #7aaa94; border-radius: 6px; color: #071512; background: #a9cfb8; font-weight: 700; cursor: pointer; }
+.execution-control-composer button:disabled { opacity: .42; cursor: not-allowed; }
+.execution-control-notice { margin: 10px 0 18px; color: #d4c39a; font-size: 11px; }
+.execution-control-grid { display: grid; grid-template-columns: minmax(320px, .85fr) minmax(380px, 1.15fr); gap: 14px; }
+.execution-control-grid > section { min-height: 360px; padding: 16px; border: 1px solid #29443a; border-radius: 10px; background: #0b1c17; }
+.execution-control-grid h3 { margin: 0 0 14px; font-size: 13px; }
+.execution-control-list { display: grid; gap: 7px; }
+.execution-control-row { display: grid; grid-template-columns: 66px minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; width: 100%; padding: 11px; border: 1px solid #29443a; border-radius: 6px; color: #dce3dd; background: #10251e; text-align: left; cursor: pointer; }
+.execution-control-row:hover, .execution-control-row:focus-visible { border-color: #729682; outline: none; }
+.execution-control-row span, .execution-control-row time { color: #7f978d; font: 9px IBM Plex Mono; }
+.execution-control-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.execution-control-row em { padding: 3px 6px; border-radius: 999px; color: #d9c59a; background: #493c20; font: normal 8px IBM Plex Mono; }
+.execution-control-row em.is-succeeded { color: #b9e5c8; background: #254d39; }
+.execution-control-row em.is-failed, .execution-control-row em.is-blocked { color: #ffd0c2; background: #4b2923; }
+.execution-control-row time { grid-column: 2 / -1; }
+.execution-control-empty { color: #7f978d; font-size: 11px; }
+.execution-control-detail h4 { margin: 8px 0; font-size: 17px; }
+.execution-control-detail > p { color: #a9b7b1; font-size: 11px; line-height: 1.7; }
+.execution-control-detail dl { display: flex; gap: 16px; }
+.execution-control-detail dl div { display: flex; gap: 7px; font-size: 10px; }
+.execution-control-detail dt { color: #7f978d; }
+.execution-control-detail article { margin-top: 12px; padding: 12px; border: 1px solid #29443a; background: #071512; }
+.execution-control-detail article > strong { color: #88b9a5; font: 9px IBM Plex Mono; }
+.execution-control-detail pre { max-height: 260px; overflow: auto; margin: 9px 0 0; color: #cdd7d1; font: 10px/1.6 IBM Plex Mono; white-space: pre-wrap; word-break: break-word; }
+.execution-control-detail ol { display: grid; gap: 7px; padding-left: 18px; color: #9fb0a9; font-size: 10px; }
+.execution-control-detail li span { margin-left: 8px; color: #6f877c; font: 9px IBM Plex Mono; }
+.execution-control-health.is-stale { color: #f0dca8; border-color: #7d6a36; background: #453a1c; }
+.execution-control-health.is-unknown { color: #c6cfca; border-color: #4b635a; background: #1b2f28; }
+.execution-control-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 22px 0 0; }
+.execution-control-metrics article { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid #29443a; border-radius: 10px; background: #0b1c17; }
+.execution-control-metrics span { color: #88b9a5; font: 9px IBM Plex Mono; letter-spacing: .12em; text-transform: uppercase; }
+.execution-control-metrics strong { font-size: clamp(19px, 2.4vw, 26px); line-height: 1.1; }
+.execution-control-metrics small { color: #7f978d; font-size: 10px; line-height: 1.6; }
+.execution-control-actions { margin: 14px 0 0; padding: 16px 18px; border: 1px solid #29443a; border-radius: 12px; background: #0d211b; }
+.execution-control-actions h3 { margin: 0 0 12px; font-size: 13px; }
+.execution-control-actions ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.execution-control-actions li { display: grid; gap: 4px; padding: 11px 13px; border: 1px solid #29443a; border-left-width: 3px; border-radius: 6px; background: #071512; }
+.execution-control-actions li strong { font-size: 12px; }
+.execution-control-actions li span { color: #9fb0a9; font-size: 11px; line-height: 1.7; }
+.execution-control-actions li.is-critical { border-left-color: #c9705d; }
+.execution-control-actions li.is-critical strong { color: #ffd0c2; }
+.execution-control-actions li.is-warning { border-left-color: #c2a44e; }
+.execution-control-actions li.is-warning strong { color: #f0dca8; }
+.execution-control-actions li.is-ok { border-left-color: #6c9b87; }
+.execution-control-actions li.is-ok strong { color: #b9e5c8; }
+.execution-control-composer h3 { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.execution-control-dispatch { grid-column: 1 / -1; margin: 0; color: #88b9a5; font-size: 11px; line-height: 1.6; }
+@media (max-width: 900px) {
+  .execution-control-composer { grid-template-columns: 1fr; }
+  .execution-control-grid { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 760px) {
-  .cloud-console-header { align-items: flex-start; }
-  .cloud-console-composer, .cloud-console-grid { grid-template-columns: 1fr; }
-  .cloud-console-composer label, .cloud-console-composer button { grid-column: 1; }
-  .cloud-console-grid > section { min-height: 0; }
+  .execution-control-header { align-items: flex-start; }
+  .execution-control-composer, .execution-control-grid { grid-template-columns: 1fr; }
+  .execution-control-composer label, .execution-control-composer button { grid-column: 1; }
+  .execution-control-grid > section { min-height: 0; }
 }
 
 .session-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -7663,6 +7688,26 @@ body,
 
 .meeting-lobby-start {
   min-height: 46px;
+}
+
+/* Ending a cloud meeting is a durable write, so its failure has to be readable
+   next to the tab it failed on rather than disappearing into the console. */
+.meeting-close-error {
+  margin: 0 18px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(176, 62, 62, 0.28);
+  border-radius: 10px;
+  background: rgba(176, 62, 62, 0.08);
+  color: #8a2f2f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.meeting-console-error {
+  color: #d98a8a;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .meeting-start-error {

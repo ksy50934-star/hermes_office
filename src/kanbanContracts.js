@@ -52,13 +52,46 @@ export function normalizeOfficeBoard(board = {}) {
   };
 }
 
-const MISSION_STATUS_BY_TASK_STATUS = {
+/**
+ * The legacy Hermes board's own statuses, spelled out. This is exact 1:1 copy
+ * for states the board really has — not a second, invented vocabulary layered
+ * over them.
+ */
+export const HERMES_TASK_STATUS_LABELS = Object.freeze({
+  triage: "분류 대기",
+  todo: "할 일",
+  scheduled: "예약됨",
+  ready: "실행 준비",
+  running: "진행 중",
+  blocked: "멈춤",
+  review: "검토",
+  done: "완료",
+  archived: "보관됨",
+});
+
+export const HERMES_TASK_STATUS_MEANINGS = Object.freeze({
+  triage: "아직 담당자나 완료 기준이 정해지지 않았습니다.",
+  todo: "업무로 확정되어 백로그에 있습니다.",
+  scheduled: "지정한 시점이나 조건에 실행되도록 예약되었습니다.",
+  ready: "준비가 끝나 dispatcher가 가져가기를 기다립니다.",
+  running: "Hermes worker가 실제로 실행하는 중입니다.",
+  blocked: "막힌 이유가 기록된 채 멈춰 있습니다.",
+  review: "Hermes worker가 결과를 검토 상태로 올려두었습니다.",
+  done: "완료 처리되었습니다.",
+  archived: "보관함으로 옮겨졌습니다.",
+});
+
+const MISSION_TONE_BY_TASK_STATUS = {
   running: "working",
+  ready: "working",
+  scheduled: "working",
   review: "approval",
   blocked: "approval",
   done: "done",
   archived: "done",
 };
+
+const TERMINAL_TASK_STATUSES = new Set(["done", "archived"]);
 
 const ROOM_BY_PROFILE = {
   default: "executive",
@@ -72,16 +105,18 @@ const ROOM_BY_PROFILE = {
   "hermes-technology": "tech",
 };
 
-function taskProgress(task, status) {
+/**
+ * Progress from evidence or not at all.
+ *
+ * A checklist is a real record of what has been ticked off, so it yields a real
+ * percentage. Nothing else does: the previous version returned 60% for every
+ * running task and 90% for every review task, which is a number the board made
+ * up about work it had not measured.
+ */
+function taskProgress(task) {
   const checklist = Array.isArray(task.metadata?.checklist) ? task.metadata.checklist : [];
-  if (checklist.length) {
-    return Math.round((checklist.filter((item) => item.done).length / checklist.length) * 100);
-  }
-  if (["done", "archived"].includes(status)) return 100;
-  if (status === "review") return 90;
-  if (status === "running") return 60;
-  if (status === "ready") return 20;
-  return 0;
+  if (!checklist.length) return null;
+  return Math.round((checklist.filter((item) => item.done).length / checklist.length) * 100);
 }
 
 export function officeMissionsFromBoard(board = {}) {
@@ -92,17 +127,41 @@ export function officeMissionsFromBoard(board = {}) {
     const status = String(task.status ?? column.name ?? "triage");
     const owner = task.assignee || "default";
     const checklist = Array.isArray(task.metadata?.checklist) ? task.metadata.checklist : [];
+    const progress = taskProgress(task);
+    const title = String(task.title ?? "").trim();
     return {
       id: task.id,
-      title: task.title || "제목 없는 Hermes 업무",
-      objective: task.body || "Hermes Kanban에서 생성된 업무입니다.",
+      // Left null rather than titled for the user. A task with no title is a
+      // real defect in the board, and printing "제목 없는 Hermes 업무" hid it.
+      title: title || null,
+      titleMissing: !title,
+      objective: String(task.body ?? "").trim() || null,
       owner,
+      ownerLabel: owner,
       room: ROOM_BY_PROFILE[owner] ?? "operations",
-      status: MISSION_STATUS_BY_TASK_STATUS[status] ?? "queued",
+      status,
+      statusLabel: HERMES_TASK_STATUS_LABELS[status] ?? status,
+      statusMeaning: HERMES_TASK_STATUS_MEANINGS[status] ?? "이 상태 값을 현재 화면이 해석하지 못했습니다.",
+      statusTone: MISSION_TONE_BY_TASK_STATUS[status] ?? "queued",
       officialStatus: status,
-      progress: taskProgress(task, status),
-      due: task.metadata?.due_date || "기한 미정",
+      terminal: TERMINAL_TASK_STATUSES.has(status),
+      active: !TERMINAL_TASK_STATUSES.has(status),
+      // Null when there is no checklist to measure. Callers render the status
+      // instead of a bar they cannot honestly fill.
+      progress,
+      progressBasis: progress == null ? null : "checklist",
+      stage: null,
+      stageLabel: null,
+      // The board does carry a real due date when someone set one. It is only
+      // reported when it exists; there is no 기한 미정 stand-in.
+      due: String(task.metadata?.due_date ?? "").trim() || null,
+      updatedAt: task.updated_at ?? task.created_at ?? null,
+      createdAt: task.created_at ?? null,
+      blockedReason: String(task.block_reason ?? task.metadata?.blocked_reason ?? "").trim() || null,
+      error: null,
+      hasResult: Boolean(task.metadata?.completed_at),
       priority: Number(task.priority ?? 0) > 0 ? "high" : "normal",
+      navigation: { view: "kanban", target: "task", taskId: task.id, profileId: owner },
       steps: checklist.map((item, index) => ({
         id: item.id ?? `${task.id}-step-${index}`,
         label: item.text ?? item.label ?? `체크리스트 ${index + 1}`,

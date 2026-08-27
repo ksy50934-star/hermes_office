@@ -8,6 +8,7 @@
  */
 
 import { authenticateConnector } from "./connectorAuth.js";
+import { authenticateUser } from "./userAuth.js";
 import { createServiceRoleClient, createWorkspaceStore } from "./store.js";
 import { loadServerEnv } from "./serverEnv.js";
 
@@ -16,6 +17,33 @@ function sendJson(response, status, body) {
   response.setHeader("Content-Type", "application/json; charset=utf-8");
   response.setHeader("Cache-Control", "no-store");
   response.send(JSON.stringify(body));
+}
+
+export function userRoute(handler) {
+  return async function route(request, response) {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "METHOD_NOT_ALLOWED" });
+      return;
+    }
+    let supabase;
+    try {
+      supabase = createServiceRoleClient(process.env);
+    } catch (error) {
+      sendJson(response, 500, { error: error.code ?? "SERVER_MISCONFIGURED", message: error.message });
+      return;
+    }
+    const auth = await authenticateUser({ headers: request.headers, supabase });
+    if (!auth.ok) {
+      sendJson(response, auth.status, { error: auth.code, message: auth.message });
+      return;
+    }
+    try {
+      const result = await handler({ auth, body: request.body ?? {}, store: createWorkspaceStore(supabase) });
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, 500, { error: "INTERNAL_ERROR", message: error.message });
+    }
+  };
 }
 
 export function connectorRoute(handler) {

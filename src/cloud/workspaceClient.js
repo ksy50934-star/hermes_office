@@ -15,6 +15,7 @@ import { getSupabaseClient } from "./supabaseBrowser.js";
 import { AUTH_CALLBACK } from "../bibi/authCallback.js";
 import { BIBI_PROFILE_IDS, toExecutionProfileId } from "../bibi/roster.js";
 import { describeConnectorHealth } from "../bibi/connectionState.js";
+import { meetingFollowupRequest } from "../bibi/meetingLifecycle.js";
 
 function client() {
   const supabase = getSupabaseClient();
@@ -203,8 +204,26 @@ export async function loadConversations(profileId) {
   );
 }
 
-export function mergeConversationMessages(webMessages, projectedMessages) {
-  const web = (webMessages ?? []).map((message) => ({
+/**
+ * One canonical timeline out of two stores.
+ *
+ * `messages` is what the web workspace wrote; `projected_messages` is what the
+ * connector lifted out of the profile-local Hermes state. The same turn can
+ * appear in both — a web question the connector then projected back — so the
+ * canonical key decides identity and the later lifecycle row wins.
+ *
+ * `conversationId`, when given, is a containment check rather than a filter for
+ * convenience: PostgREST already scoped the reads by conversation and RLS
+ * already scoped them by owner, and this is the third place that has to be
+ * wrong before one conversation could show another's messages.
+ */
+export function mergeConversationMessages(webMessages, projectedMessages, { conversationId = null } = {}) {
+  const belongs = (message) => (
+    conversationId === null
+    || message?.conversation_id === undefined
+    || message.conversation_id === conversationId
+  );
+  const web = (webMessages ?? []).filter(belongs).map((message) => ({
     ...message,
     channel: "web",
     provenance: "web",
@@ -215,7 +234,7 @@ export function mergeConversationMessages(webMessages, projectedMessages) {
       ? message.client_message_id
       : `web:${message.id}`,
   }));
-  const projected = (projectedMessages ?? []).map((message) => ({
+  const projected = (projectedMessages ?? []).filter(belongs).map((message) => ({
     ...message,
     binding_channel: message.channel,
     channel: message.origin_channel ?? message.channel,
@@ -235,7 +254,12 @@ export function mergeConversationMessages(webMessages, projectedMessages) {
   return [...canonical.values()].filter((message) => !message.lifecycle_state || message.lifecycle_state === "active").sort((left, right) => {
     const time = Date.parse(left.timeline_at ?? "") - Date.parse(right.timeline_at ?? "");
     if (time) return time;
-    return Number(left.source_sequence ?? Number.MAX_SAFE_INTEGER) - Number(right.source_sequence ?? Number.MAX_SAFE_INTEGER);
+    const sequence = Number(left.source_sequence ?? Number.MAX_SAFE_INTEGER) - Number(right.source_sequence ?? Number.MAX_SAFE_INTEGER);
+    if (sequence) return sequence;
+    // Two rows with the same timestamp and the same sequence still have to land
+    // in one fixed order, or a refetch can reorder the visible timeline under
+    // the reader for no reason they could see.
+    return String(left.canonical_message_key ?? left.id ?? "").localeCompare(String(right.canonical_message_key ?? right.id ?? ""));
   });
 }
 
@@ -258,7 +282,135 @@ export async function loadMessages(conversationId) {
   return mergeConversationMessages(
     unwrap(web, "loadMessages.web"),
     unwrap(projected, "loadMessages.projected"),
+    { conversationId },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Telegram binding
+// ---------------------------------------------------------------------------
+
+const BINDING_COLUMNS =
+  "id, conversation_id, organization_profile_id, execution_profile_id, channel, "
+  + "channel_account_id, external_conversation_id, hermes_session_id, binding_state, "
+  + "initiation_source, verification_code, verification_error, verification_attempts, "
+  + "verified_at, last_verification_at, cancelled_at, created_at, updated_at";
+
+/**
+ * The Telegram binding behind one conversation, and what the projection has
+ * actually moved through it.
+ *
+ * Both reads are select-only under RLS. The binding is the claim; the checkpoint
+ * is the evidence, and the UI shows them separately because a verified binding
+ * that has moved nothing is a real and reportable state.
+ */
+export async function loadConversationBinding(conversationId) {
+  const supabase = client();
+  const bindings = unwrap(
+    await supabase
+      .from("conversation_bindings")
+      .select(BINDING_COLUMNS)
+      .eq("conversation_id", conversationId)
+      .eq("channel", "telegram")
+      .order("created_at", { ascending: false })
+      .limit(1),
+    "loadConversationBinding",
+  );
+  const binding = bindings[0] ?? null;
+  if (!binding) return { binding: null, checkpoint: null };
+
+  const checkpoints = unwrap(
+    await supabase
+      .from("projection_checkpoints")
+      .select("binding_id, last_source_message_id, last_source_sequence, sync_status, last_error, updated_at")
+      .eq("binding_id", binding.id)
+      .limit(1),
+    "loadConversationBinding.checkpoint",
+  );
+  return { binding, checkpoint: checkpoints[0] ?? null };
+}
+
+/**
+ * The Telegram sessions the connector reported, and the per-profile record of
+ * whether it managed to look at all.
+ *
+ * Neither table holds a message body, a title or an excerpt — discovery reports
+ * that a thread exists and how it is addressed, never what is in it.
+ */
+export async function loadTelegramDiscovery() {
+  const supabase = client();
+  const [sessions, scans] = await Promise.all([
+    supabase
+      .from("bibi_telegram_sessions")
+      .select("id, organization_profile_id, execution_profile_id, hermes_session_id, channel, channel_account_id, external_conversation_id, identity_complete, session_state, message_count, last_activity_at, collected_at")
+      .order("last_activity_at", { ascending: false, nullsFirst: false })
+      .limit(200),
+    supabase
+      .from("bibi_telegram_session_scans")
+      .select("organization_profile_id, execution_profile_id, session_count, eligible_count, scan_error, scanned_at")
+      .limit(50),
+  ]);
+  return {
+    sessions: unwrap(sessions, "loadTelegramDiscovery.sessions"),
+    scans: unwrap(scans, "loadTelegramDiscovery.scans"),
+  };
+}
+
+/**
+ * Ask for a Telegram session to be connected to this conversation.
+ *
+ * This creates a request, not a connection. The route behind it can only write
+ * `pending`, and the connector is the only thing that can move it further, so
+ * nothing the browser sends here — no field, no value, no retry — produces a
+ * verified binding.
+ *
+ * `clientRequestId` is the idempotency key: a double click or a retry after a
+ * dropped response resolves to the original request instead of racing the
+ * unique identity constraint.
+ */
+export async function requestConversationBinding({
+  conversationId,
+  hermesSessionId,
+  channelAccountId,
+  externalConversationId,
+  clientRequestId = randomId(),
+  action = "request",
+}) {
+  const response = await fetch("/api/chat/binding", {
+    method: "POST",
+    headers: await authorizedHeaders(),
+    body: JSON.stringify({
+      action,
+      conversationId,
+      channel: "telegram",
+      hermesSessionId,
+      channelAccountId,
+      externalConversationId,
+      clientRequestId,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? `Telegram 연결을 요청하지 못했습니다 (${response.status})`);
+  }
+  return { ...payload, clientRequestId };
+}
+
+/**
+ * Disconnect a binding. This unbinds a channel; it deletes nothing. Every
+ * message already projected into the conversation stays exactly where it is.
+ */
+export async function cancelConversationBinding({ bindingId, reason = "" }) {
+  const response = await fetch("/api/chat/binding", {
+    method: "POST",
+    headers: await authorizedHeaders(),
+    body: JSON.stringify({ action: "cancel", bindingId, reason }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? `Telegram 연결을 해제하지 못했습니다 (${response.status})`);
+  }
+  return payload;
 }
 
 export async function startConversation({ ownerId, profileId, title = "" }) {
@@ -326,11 +478,18 @@ export async function sendUserMessage({ conversationId, body, clientMessageId = 
 // Work
 // ---------------------------------------------------------------------------
 
+/**
+ * The work board.
+ *
+ * `client_request_id` is selected because it is the intake idempotency key: the
+ * meeting archive reads it to tell an unfiled follow-up from one that was
+ * already filed, instead of filing it again to find out.
+ */
 export async function loadWorkItems({ limit = 100 } = {}) {
   return unwrap(
     await client()
       .from("work_items")
-      .select("id, profile_id, kind, title, brief, status, attempt, error, blocked_reason, result_id, lease_expires_at, created_at, updated_at")
+      .select("id, profile_id, kind, title, brief, status, attempt, error, blocked_reason, result_id, client_request_id, lease_expires_at, created_at, updated_at")
       // Chat dispatch uses the same table and the same lifecycle, but it is not
       // deliberate work; showing it here would bury the board under every
       // sentence the user typed.
@@ -431,42 +590,154 @@ export async function transitionWork({ workItemId, type, profileId = null, reaso
 // Meetings, archive and data room
 // ---------------------------------------------------------------------------
 
-export async function startMeeting({ topic, profileIds }) {
+export async function startMeeting({ topic, profileIds, clientRequestId = randomId() }) {
   const unique = [...new Set((profileIds ?? []).filter((id) => BIBI_PROFILE_IDS.includes(id)))];
   if (!String(topic ?? "").trim()) throw new Error("회의 주제를 입력해 주세요.");
   if (!unique.length) throw new Error("실제 비비를 한 명 이상 선택해 주세요.");
+  const requestId = String(clientRequestId ?? "").trim();
+  if (!requestId) throw new Error("회의 요청 ID가 필요합니다.");
   const result = await client().rpc("bibi_start_meeting", {
     p_topic: String(topic).trim(),
     p_profile_ids: unique,
+    p_client_request_id: requestId,
   });
   if (result.error) throw new Error(`startMeeting: ${result.error.message}`);
   return result.data;
 }
 
+/**
+ * Every meeting the owner has, with the real work behind each participant.
+ *
+ * Results and evidence are read here rather than on demand because the archive
+ * renders them and because completion is decided from them: a meeting whose
+ * participants are all terminal is one the database will accept an automatic
+ * completion for. Both are fetched by the meeting work item ids, so this never
+ * pulls the whole work history to show one meeting.
+ */
 export async function loadMeetings() {
   const supabase = client();
-  const [meetings, participants, work, results] = await Promise.all([
-    supabase.from("bibi_meetings").select("id, topic, status, created_at, completed_at")
+  const [meetings, participants, work] = await Promise.all([
+    supabase.from("bibi_meetings").select("id, topic, status, completion_mode, created_at, completed_at")
       .order("created_at", { ascending: false }).limit(50),
     supabase.from("bibi_meeting_participants").select("id, meeting_id, profile_id, work_item_id, created_at")
       .order("created_at"),
     supabase.from("work_items").select("id, meeting_id, profile_id, status, attempt, error, result_id, created_at, updated_at")
       .eq("kind", "meeting").order("created_at"),
-    supabase.from("work_results").select("id, work_item_id, summary, detail, created_at").order("created_at"),
   ]);
   const rows = unwrap(meetings, "loadMeetings.meetings");
   const participantRows = unwrap(participants, "loadMeetings.participants");
   const workRows = unwrap(work, "loadMeetings.work");
+  const workIds = workRows.map((item) => item.id);
+
+  const [results, evidence] = workIds.length
+    ? await Promise.all([
+        supabase.from("work_results").select("id, work_item_id, summary, detail, created_at")
+          .in("work_item_id", workIds).order("created_at"),
+        supabase.from("work_evidence")
+          .select("id, work_item_id, kind, label, sha256, byte_size, storage_path, inline_excerpt, execution_profile_id, created_at")
+          .in("work_item_id", workIds).order("created_at"),
+      ])
+    : [{ data: [] }, { data: [] }];
   const resultRows = unwrap(results, "loadMeetings.results");
+  const evidenceRows = unwrap(evidence, "loadMeetings.evidence");
+
   const workById = new Map(workRows.map((item) => [item.id, item]));
-  const resultsByWork = new Map(resultRows.map((item) => [item.work_item_id, item]));
+  const resultsByWork = new Map();
+  for (const result of resultRows) {
+    if (!resultsByWork.has(result.work_item_id)) resultsByWork.set(result.work_item_id, []);
+    resultsByWork.get(result.work_item_id).push(result);
+  }
+  const evidenceByWork = new Map();
+  for (const item of evidenceRows) {
+    if (!evidenceByWork.has(item.work_item_id)) evidenceByWork.set(item.work_item_id, []);
+    evidenceByWork.get(item.work_item_id).push(item);
+  }
+
   return rows.map((meeting) => ({
     ...meeting,
     participants: participantRows.filter((item) => item.meeting_id === meeting.id).map((item) => {
-      const workItem = workById.get(item.work_item_id) ?? null;
-      return { ...item, work: workItem, result: resultsByWork.get(item.work_item_id) ?? null };
+      const participantResults = resultsByWork.get(item.work_item_id) ?? [];
+      return {
+        ...item,
+        work: workById.get(item.work_item_id) ?? null,
+        // `result` stays for the callers that render one statement per speaker;
+        // `results` is the whole truth for the ones that render the record.
+        result: participantResults[0] ?? null,
+        results: participantResults,
+        evidence: evidenceByWork.get(item.work_item_id) ?? [],
+      };
     }),
   }));
+}
+
+/**
+ * End one meeting the owner owns.
+ *
+ * `mode` decides which rule the database applies, not whether it applies one:
+ * `manual` is the owner closing their own meeting, `automatic` asks the
+ * database to close it only if every participant work item is already terminal.
+ * An automatic call against a meeting that is not finished is not an error — it
+ * comes back with the meeting still running and the counts that say why.
+ */
+export async function completeMeeting({ meetingId, mode = "manual" } = {}) {
+  if (!meetingId) throw new Error("종료할 회의를 찾지 못했습니다.");
+  const result = await client().rpc("bibi_complete_meeting", {
+    p_meeting_id: meetingId,
+    p_mode: mode,
+  });
+  if (result.error) throw new Error(`completeMeeting: ${result.error.message}`);
+  const rows = Array.isArray(result.data) ? result.data : result.data ? [result.data] : [];
+  const row = rows[0];
+  if (!row) throw new Error("회의를 종료하지 못했습니다. 회의를 다시 확인해 주세요.");
+  return {
+    meetingId: row.meeting_id,
+    status: row.meeting_status,
+    completedAt: row.meeting_completed_at ?? null,
+    completionMode: row.meeting_completion_mode ?? null,
+    participantCount: Number(row.participant_count ?? 0),
+    terminalCount: Number(row.terminal_count ?? 0),
+    completedNow: Boolean(row.completed_now),
+  };
+}
+
+/**
+ * Complete a meeting and read the persisted result back before reporting it.
+ *
+ * Same contract as `startMeetingWithReadback`: the UI shows what the database
+ * has, not what the call was asked to do. A completion that did not land is a
+ * failure the user is told about, rather than an active meeting that quietly
+ * reappears on the next refresh.
+ */
+export async function completeMeetingWithReadback(input, dependencies = {}) {
+  const complete = dependencies.complete ?? completeMeeting;
+  const load = dependencies.load ?? loadMeetings;
+  const completion = await complete(input);
+  const meetings = await load();
+  const meeting = meetings.find((item) => item.id === (completion?.meetingId ?? input?.meetingId));
+  if (!meeting) throw new Error("회의를 종료했지만 종료 결과를 다시 확인하지 못했습니다.");
+  if (meeting.status !== "complete") throw new Error("회의 종료가 아직 반영되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+  return { meetingId: meeting.id, meeting, meetings, completion };
+}
+
+/**
+ * File a follow-up work item from one explicitly selected span of meeting text.
+ *
+ * The selection is the user's; this only carries it. The idempotency key is
+ * derived from the meeting, the row the text came from and the text itself, so
+ * a double click, a retry after a dropped response and a second visit to the
+ * archive all resolve to the same work item.
+ */
+export async function createMeetingFollowup({ ownerId, meetingId, candidate }, dependencies = {}) {
+  const file = dependencies.fileWork ?? fileWork;
+  const request = meetingFollowupRequest({ meetingId, candidate });
+  const { workItem, duplicate } = await file({
+    ownerId,
+    profileId: request.profileId,
+    title: request.title,
+    brief: request.brief,
+    clientRequestId: request.clientRequestId,
+  });
+  return { workItem, duplicate, clientRequestId: request.clientRequestId };
 }
 
 export async function startMeetingWithReadback(input, dependencies = {}) {
@@ -481,18 +752,23 @@ export async function startMeetingWithReadback(input, dependencies = {}) {
 
 export async function loadConversationArchive() {
   const supabase = client();
-  const [conversations, messages] = await Promise.all([
+  const [conversations, messages, projectedMessages] = await Promise.all([
     supabase.from("conversations").select("id, profile_id, title, last_message_at, created_at")
       .order("last_message_at", { ascending: false, nullsFirst: false }).limit(200),
-    supabase.from("messages").select("id, conversation_id, profile_id, role, body, created_at")
+    supabase.from("messages").select("id, conversation_id, profile_id, role, body, created_at, client_message_id")
       .order("created_at").limit(2000),
+    supabase.from("projected_messages")
+      .select("id, conversation_id, role, body, channel, origin_channel, canonical_message_key, canonical_turn_id, lifecycle_state, source_message_id, source_sequence, source_timestamp, sync_status, organization_profile_id, execution_profile_id, hermes_session_id")
+      .order("source_sequence").limit(5000),
   ]);
   const conversationRows = unwrap(conversations, "loadConversationArchive.conversations");
   const messageRows = unwrap(messages, "loadConversationArchive.messages");
-  return conversationRows.map((conversation) => ({
-    ...conversation,
-    messages: messageRows.filter((message) => message.conversation_id === conversation.id),
-  }));
+  const projectedRows = unwrap(projectedMessages, "loadConversationArchive.projectedMessages");
+  return conversationRows.map((conversation) => {
+    const canonicalMessages = mergeConversationMessages(messageRows, projectedRows, { conversationId: conversation.id });
+    const latest = canonicalMessages.at(-1)?.timeline_at ?? conversation.last_message_at;
+    return { ...conversation, last_message_at: latest, messages: canonicalMessages };
+  }).sort((left, right) => Date.parse(right.last_message_at ?? right.created_at ?? "") - Date.parse(left.last_message_at ?? left.created_at ?? ""));
 }
 
 export async function loadDataRoomArtifacts() {
@@ -556,7 +832,7 @@ export async function loadDataRoomArtifacts() {
  * was missed while the tab was asleep, so the caller must refetch rather than
  * assume its cache is still current.
  */
-export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onOrganization, onPluginInventory, onRuntimeHealth, onDocumentTree, onResync } = {}) {
+export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent, onMessage, onConnector, onMeeting, onMeetingParticipant, onResult, onEvidence, onOrganization, onPluginInventory, onRuntimeHealth, onDocumentTree, onProjectedMessage, onConversation, onConversationBinding, onProjectionCheckpoint, onTelegramSession, onTelegramSessionScan, onResync } = {}) {
   if (!supabase) return () => {};
 
   let disposed = false;
@@ -587,6 +863,17 @@ export function createWorkspaceSubscription(supabase, { onWorkItem, onWorkEvent,
     bind("bibi_plugin_inventory", onPluginInventory);
     bind("bibi_runtime_health", onRuntimeHealth);
     bind("bibi_document_trees", onDocumentTree);
+    // The canonical conversation timeline. `projected_messages` is where every
+    // Telegram turn lands, and without it a bound conversation only moves when
+    // the browser refetches by hand. The other three are what the chat header
+    // reports: origin and sync status, binding state, and what the projection
+    // has actually delivered.
+    bind("projected_messages", onProjectedMessage);
+    bind("conversations", onConversation);
+    bind("conversation_bindings", onConversationBinding);
+    bind("projection_checkpoints", onProjectionCheckpoint);
+    bind("bibi_telegram_sessions", onTelegramSession);
+    bind("bibi_telegram_session_scans", onTelegramSessionScan);
   };
 
   (async () => {

@@ -85,6 +85,26 @@ export function createOutboundTransport(config, { fetchImpl = globalThis.fetch }
     uploadRuntimeProjection(payload) {
       return request("/api/connector/runtime/projection", { body: payload });
     },
+    /**
+     * The bindings the owner has asked for and nobody has proved yet. This is a
+     * work list, not a subscription: the control plane still cannot call in.
+     */
+    listPendingBindings() {
+      return request("/api/connector/binding/pending", { body: {} });
+    },
+    /**
+     * The result of checking one pending binding against the profile-local
+     * Hermes state. This is the only call in the system that can move a binding
+     * to verified, and it carries the identity it proved so the control plane
+     * can refuse a verification aimed at some other session.
+     */
+    reportBindingVerification(payload) {
+      return request("/api/connector/binding/verify", { body: payload });
+    },
+    /** Identity and reachability of local Telegram sessions. Never their content. */
+    uploadTelegramSessions(payload) {
+      return request("/api/connector/sessions/telegram", { body: payload });
+    },
   };
 }
 

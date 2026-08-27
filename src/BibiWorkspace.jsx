@@ -22,6 +22,14 @@ import {
   describeProfileAvailability,
 } from "./bibi/connectionState.js";
 import { SEVERITY, describeConnectorProfileMismatch, mismatchSummaryText } from "./bibi/profileMismatch.js";
+import {
+  BRIDGE_STATE,
+  DISCOVERY_STATE,
+  describeConversationBridge,
+  describeEligibleSession,
+  describeTelegramDiscovery,
+} from "./bibi/telegramBridge.js";
+import { createRefetchCoalescer } from "./bibi/realtimeCoalescer.js";
 import { describeBrowserRuntimeMismatch, runtimeSummaryText } from "./bibi/runtimeEnvironment.js";
 import { resetScrollOnAuthTransition } from "./bibi/authTransitionScroll.js";
 import { WORK_STATUS, isTerminalStatus } from "./bibi/workLifecycle.js";
@@ -53,12 +61,17 @@ import {
   BibiMeetingSurface,
   BibiRosterSurface,
 } from "./BibiCloudSurfaces.jsx";
+import { indexMeetingFollowups } from "./bibi/meetingLifecycle.js";
 import {
+  cancelConversationBinding,
+  completeMeetingWithReadback,
+  createMeetingFollowup,
   establishSessionFromCallback,
   fileWork,
   loadChatDispatch,
   loadConnectorState,
   loadConversationArchive,
+  loadConversationBinding,
   loadConversations,
   loadDataRoomArtifacts,
   loadDocumentTrees,
@@ -67,10 +80,12 @@ import {
   loadOrganizationState,
   loadRoster,
   loadRuntimeProjection,
+  loadTelegramDiscovery,
   loadWorkDetail,
   loadWorkItems,
   onAuthStateChange,
   getSession,
+  requestConversationBinding,
   sendUserMessage,
   signInWithPassword,
   signOut,
@@ -183,7 +198,102 @@ function RosterRail({ roster, activeProfileId, availabilityFor, onSelect }) {
   );
 }
 
-function ChatPanel({ profile, availability, conversation, conversations, messages, dispatch, onSend, onSelectConversation, onNewConversation, busy, error }) {
+/**
+ * The Telegram bridge panel of one conversation.
+ *
+ * Everything on it is a readback. The state line names the binding state the
+ * database holds, the projection line names what the checkpoint says has
+ * actually moved, and the onboarding list is the sessions the connector
+ * reported — never a free-text field for an identifier nobody can confirm.
+ *
+ * When discovery did not work there is no list and no input, only the reason.
+ * Offering a text box there would let the owner create a binding the verifier is
+ * guaranteed to refuse, which reads as a broken feature rather than as the
+ * missing prerequisite it is.
+ */
+function TelegramBridgePanel({ bridge, discovery, onConnect, onRetry, onDisconnect, busy }) {
+  return (
+    <section className="bibi-telegram-bridge" aria-label="Telegram 대화 연결">
+      <header className="bibi-bridge-header">
+        <h3>Telegram 대화 연결</h3>
+        <span className={`bibi-badge bibi-bridge-${bridge.state}`}>{bridge.label}</span>
+      </header>
+
+      <p className="bibi-bridge-detail">{bridge.detail}</p>
+
+      <dl className="bibi-bridge-facts">
+        <div>
+          <dt>커넥터</dt>
+          <dd>{bridge.connectorLabel}</dd>
+        </div>
+        <div>
+          <dt>대화 출처</dt>
+          <dd>{bridge.originLabel}</dd>
+        </div>
+        <div>
+          <dt>연결 상태</dt>
+          <dd>{bridge.label}{bridge.hermesSessionId ? ` · 세션 ${bridge.hermesSessionId}` : ""}</dd>
+        </div>
+        <div>
+          <dt>미러링</dt>
+          {/* Sending web answers back to Telegram has no agreed delivery
+              contract, so it is off and reported as off rather than hidden. */}
+          <dd>{bridge.mirroringEnabled ? "Telegram 미러링 켜짐" : "Telegram 미러링 꺼짐"}</dd>
+        </div>
+        <div>
+          <dt>마지막 반영</dt>
+          <dd>{bridge.projectionLabel}</dd>
+        </div>
+      </dl>
+
+      {bridge.state === BRIDGE_STATE.NONE || bridge.state === BRIDGE_STATE.UNBOUND ? (
+        discovery.state === DISCOVERY_STATE.READY ? (
+          <>
+            {discovery.detail ? <p className="bibi-bridge-notice">{discovery.detail}</p> : null}
+            <ul className="bibi-bridge-sessions">
+              {discovery.sessions.map((session) => {
+                const described = describeEligibleSession(session);
+                return (
+                  <li key={described.id}>
+                    <div>
+                      <strong>{described.title}</strong>
+                      <span>{described.detail}</span>
+                      <span className="bibi-bridge-session-id">세션 {described.hermesSessionId}</span>
+                    </div>
+                    <button type="button" onClick={() => onConnect(session)} disabled={busy}>이 대화 연결</button>
+                  </li>
+                );
+              })}
+            </ul>
+            {discovery.incompleteCount > 0 ? (
+              <p className="bibi-bridge-notice">
+                주소를 확인할 수 없는 세션 {discovery.incompleteCount}개는 목록에서 제외했습니다. 확정할 수 없는 값으로 연결하지 않습니다.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="bibi-bridge-notice" role="status">{discovery.detail}</p>
+        )
+      ) : null}
+
+      <div className="bibi-bridge-actions">
+        {bridge.canRetry ? (
+          <button type="button" onClick={onRetry} disabled={busy}>연결 다시 시도</button>
+        ) : null}
+        {bridge.canDisconnect ? (
+          <button type="button" className="bibi-bridge-disconnect" onClick={onDisconnect} disabled={busy}>
+            연결 해제
+          </button>
+        ) : null}
+      </div>
+      {bridge.canDisconnect ? (
+        <p className="bibi-bridge-notice">연결을 해제해도 이미 저장된 대화 내용은 삭제되지 않습니다.</p>
+      ) : null}
+    </section>
+  );
+}
+
+function ChatPanel({ profile, availability, conversation, conversations, messages, dispatch, bridge, discovery, onSend, onSelectConversation, onNewConversation, onConnectTelegram, onRetryTelegram, onDisconnectTelegram, busy, error }) {
   const [draft, setDraft] = useState("");
   const messagesRef = useRef(null);
 
@@ -244,10 +354,24 @@ function ChatPanel({ profile, availability, conversation, conversations, message
         </ul>
       </section>
 
+      {/* One line of provenance, straight off the conversation row. The bridge
+          panel below it carries the reason and the action. */}
       <p className="bibi-chat-sync" role="status">
         {conversation?.origin_channel === "telegram" ? "Telegram에서 시작 · " : "웹에서 시작 · "}
-        동기화 {conversation?.sync_status ?? "UNKNOWN"} · Telegram 미러링 꺼짐
+        동기화 {conversation?.sync_status ?? "UNKNOWN"} · {bridge?.label ?? "Telegram 연결 없음"}
+        {conversation?.sync_error ? ` · ${conversation.sync_error}` : ""}
       </p>
+
+      {bridge && discovery ? (
+        <TelegramBridgePanel
+          bridge={bridge}
+          discovery={discovery}
+          onConnect={onConnectTelegram}
+          onRetry={onRetryTelegram}
+          onDisconnect={onDisconnectTelegram}
+          busy={busy}
+        />
+      ) : null}
 
       <ol className="bibi-messages" ref={messagesRef}>
         {messages.map((message) => (
@@ -739,6 +863,11 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [chatDispatch, setChatDispatch] = useState([]);
+  // The Telegram binding of the open conversation, and the evidence of what it
+  // has actually moved. Kept apart from the conversation row because a verified
+  // binding that has projected nothing is a real state the header has to report.
+  const [binding, setBinding] = useState({ binding: null, checkpoint: null });
+  const [telegram, setTelegram] = useState({ sessions: [], scans: [] });
   const [cloudRevision, setCloudRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -804,7 +933,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   // ---- workspace snapshot --------------------------------------------------
   const loadSnapshot = useCallback(async () => {
     if (!cloud.configured || !ownerId) return null;
-    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, documentTreeRows, organizationRows, runtimeRows] = await Promise.all([
+    const [rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, documentTreeRows, organizationRows, runtimeRows, telegramRows] = await Promise.all([
       loadRoster(),
       loadConnectorState(),
       loadWorkItems(),
@@ -814,9 +943,15 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       loadDocumentTrees(),
       loadOrganizationState(ownerId),
       loadRuntimeProjection(),
+      loadTelegramDiscovery(),
     ]);
-    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, documentTreeRows, organizationRows, runtimeRows };
+    return { rosterRows, connectorState, items, archiveRows, meetingRows, artifactRows, documentTreeRows, organizationRows, runtimeRows, telegramRows };
   }, [cloud.configured, ownerId]);
+
+  // When the owner-scoped snapshot was last read back. Surfaces compare it
+  // against the clock to say "this may be out of date" rather than presenting a
+  // stale read as current.
+  const [syncedAt, setSyncedAt] = useState(null);
 
   const applySnapshot = useCallback((snapshot) => {
     // An empty roster table means the migration has not run yet. The compiled
@@ -831,17 +966,93 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     setDocumentTrees(snapshot.documentTreeRows);
     setOrganizationState(snapshot.organizationRows);
     setRuntimeProjection(snapshot.runtimeRows);
+    setTelegram(snapshot.telegramRows);
+    setSyncedAt(new Date().toISOString());
     setError("");
+  }, []);
+
+  // Which conversation the timeline on screen belongs to. A ref rather than a
+  // dependency: a realtime refetch that resolves after the user has already
+  // moved on must be dropped, and `refresh` must not be rebuilt — and the
+  // subscription torn down and rejoined — every time the selection changes.
+  const conversationIdRef = useRef(null);
+  const activeProfileIdRef = useRef(CEO_PROFILE_ID);
+
+  /**
+   * Re-read one conversation's canonical timeline: the web messages, the
+   * projected Telegram messages behind them, the chat commands that answer them
+   * and the binding that decides what the header may claim.
+   */
+  const refreshConversation = useCallback(async (conversationId) => {
+    if (!conversationId) return;
+    try {
+      const [nextMessages, nextDispatch, nextBinding] = await Promise.all([
+        loadMessages(conversationId),
+        loadChatDispatch(conversationId),
+        loadConversationBinding(conversationId),
+      ]);
+      // The selection moved while this was in flight; showing it now would put
+      // one conversation's messages under another's header.
+      if (conversationIdRef.current !== conversationId) return;
+      setMessages(nextMessages);
+      setChatDispatch(nextDispatch);
+      setBinding(nextBinding);
+    } catch (conversationError) {
+      setError(conversationError.message);
+    }
+  }, []);
+
+  const refreshTelegramDiscovery = useCallback(async () => {
+    try {
+      setTelegram(await loadTelegramDiscovery());
+    } catch (discoveryError) {
+      setError(discoveryError.message);
+    }
+  }, []);
+
+  const refreshConversationList = useCallback(async () => {
+    try {
+      const rows = await loadConversations(activeProfileIdRef.current);
+      setConversations((current) => (rows.length ? rows : current));
+      setConversation((current) => (current ? rows.find((row) => row.id === current.id) ?? current : current));
+    } catch (listError) {
+      setError(listError.message);
+    }
   }, []);
 
   const refresh = useCallback(async () => {
     try {
       const snapshot = await loadSnapshot();
       if (snapshot) applySnapshot(snapshot);
+      // A reconnect is the one moment the local cache is known to be behind by
+      // an unknown amount, and this is what `onResync` calls, so the open
+      // conversation is re-read here rather than being left until the user
+      // clicks something.
+      await refreshConversation(conversationIdRef.current);
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [loadSnapshot, applySnapshot]);
+  }, [loadSnapshot, applySnapshot, refreshConversation]);
+
+  // Ending a meeting is a write plus a readback, never a local state change:
+  // the meeting list this surface renders has to come from what the database
+  // holds, or the archive and the active list will disagree after a reload.
+  const completeCloudMeeting = useCallback(async (meeting) => {
+    const { meetings: nextMeetings } = await completeMeetingWithReadback({ meetingId: meeting.id, mode: "manual" });
+    setMeetings(nextMeetings);
+    setCloudRevision((current) => current + 1);
+    return true;
+  }, []);
+
+  // A follow-up carries one span the user picked, and its idempotency key is
+  // derived from that span, so a second attempt returns the first work item.
+  const createFollowup = useCallback(async (meeting, candidate) => {
+    const result = await createMeetingFollowup({ ownerId, meetingId: meeting.id, candidate });
+    await refresh();
+    return result;
+  }, [ownerId, refresh]);
+
+  const meetingFollowups = useMemo(() => indexMeetingFollowups(workItems), [workItems]);
 
   useEffect(() => {
     let active = true;
@@ -857,15 +1068,30 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   }, [loadSnapshot, applySnapshot]);
 
   // ---- realtime ------------------------------------------------------------
+  // One projection upload is one insert per message, so a connector cycle that
+  // lifts two hundred Telegram turns delivers two hundred events. Refetching per
+  // event would issue two hundred identical queries and render the earliest
+  // answer last. The coalescer collapses each burst into one refetch per thing
+  // being refetched.
+  const coalescerRef = useRef(null);
+  if (coalescerRef.current == null) coalescerRef.current = createRefetchCoalescer();
+  useEffect(() => () => coalescerRef.current?.dispose(), []);
+
   useEffect(() => {
     if (!cloud.configured || !ownerId) return undefined;
+    const coalesce = (key, task) => coalescerRef.current?.push(key, task);
     return subscribeToWorkspace({
       onWorkItem: (row) => {
         if (!row?.id) return;
         setCloudRevision((current) => current + 1);
+        // A meeting participant's work item going terminal is what makes its
+        // meeting completable, and no row on `bibi_meetings` changes when it
+        // does. Merging this one row in place would leave the meeting's own
+        // state stale, so the whole owner-scoped snapshot is re-read.
+        if (row.kind === "meeting") { void refresh(); return; }
         // Chat dispatch and deliberate work share a table but not a surface.
         if (row.kind === "chat") {
-          if (row.conversation_id !== conversation?.id) return;
+          if (row.conversation_id !== conversationIdRef.current) return;
           setChatDispatch((current) => {
             const index = current.findIndex((item) => item.id === row.id);
             if (index === -1) return [row, ...current];
@@ -891,12 +1117,17 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
           reportedProfileIds: Array.isArray(row.reported_profile_ids) ? row.reported_profile_ids : [],
         });
       },
+      // An assistant turn the connector wrote. The row is appended immediately
+      // so the answer appears without waiting, and the conversation is then
+      // re-read once per burst to apply the canonical merge the row alone
+      // cannot: dedupe against a projected copy of the same turn, and ordering.
       onMessage: (row) => {
         if (!row?.id) return;
         setCloudRevision((current) => current + 1);
         void refresh();
-        if (row.conversation_id !== conversation?.id) return;
+        if (row.conversation_id !== conversationIdRef.current) return;
         setMessages((current) => (current.some((message) => message.id === row.id) ? current : [...current, row]));
+        coalesce(`conversation:${row.conversation_id}`, () => refreshConversation(row.conversation_id));
       },
       onMeeting: () => { setCloudRevision((current) => current + 1); void refresh(); },
       onMeetingParticipant: () => { setCloudRevision((current) => current + 1); void refresh(); },
@@ -928,11 +1159,50 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
         setDocumentTrees((current) => [row, ...current.filter((item) => item.profile_id !== row.profile_id)]);
         setCloudRevision((current) => current + 1);
       },
+      // A Telegram turn the connector projected. The row itself is not merged in
+      // place: the canonical timeline is the merge of two tables with dedupe and
+      // lifecycle replacement over it, and half of that merge cannot be done
+      // from one row. So the conversation is re-read, once per burst.
+      onProjectedMessage: (row) => {
+        if (!row?.conversation_id) return;
+        setCloudRevision((current) => current + 1);
+        if (row.conversation_id !== conversationIdRef.current) return;
+        coalesce(`conversation:${row.conversation_id}`, () => refreshConversation(row.conversation_id));
+      },
+      // Origin, sync status and mirroring all live on the conversation row, and
+      // all three are rendered in the chat header.
+      onConversation: (row) => {
+        if (!row?.id) return;
+        setCloudRevision((current) => current + 1);
+        setConversations((current) => current.map((item) => (item.id === row.id ? { ...item, ...row } : item)));
+        setConversation((current) => (current?.id === row.id ? { ...current, ...row } : current));
+        coalesce("conversations", refreshConversationList);
+      },
+      // The binding state is the whole of what the header may claim about sync,
+      // so a verification landing has to reach the screen without a reload.
+      onConversationBinding: (row) => {
+        if (!row?.conversation_id) return;
+        setCloudRevision((current) => current + 1);
+        if (row.conversation_id !== conversationIdRef.current) return;
+        coalesce(`binding:${row.conversation_id}`, () => refreshConversation(row.conversation_id));
+      },
+      onProjectionCheckpoint: (row) => {
+        if (!row?.binding_id) return;
+        setCloudRevision((current) => current + 1);
+        const openConversationId = conversationIdRef.current;
+        if (!openConversationId) return;
+        coalesce(`binding:${openConversationId}`, () => refreshConversation(openConversationId));
+      },
+      onTelegramSession: () => coalesce("telegram", refreshTelegramDiscovery),
+      onTelegramSessionScan: () => coalesce("telegram", refreshTelegramDiscovery),
       // Realtime replays nothing that happened while the socket was down, so a
       // reconnect refetches instead of trusting the local cache.
       onResync: refresh,
     });
-  }, [cloud.configured, ownerId, conversation?.id, refresh]);
+    // Deliberately not keyed on the open conversation: every handler above
+    // reads the current selection from a ref, and rebuilding the channel on each
+    // switch would drop whatever arrived during the rejoin.
+  }, [cloud.configured, ownerId, refresh, refreshConversation, refreshConversationList, refreshTelegramDiscovery]);
 
   // ---- connector health ages even without a new event ----------------------
   useEffect(() => {
@@ -947,6 +1217,18 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   }, [connector.node?.last_heartbeat_at]);
 
   // ---- conversation for the selected profile -------------------------------
+  // What the realtime handlers match incoming rows against. Every place that
+  // changes the selection also sets `conversationIdRef` directly, before it
+  // awaits anything, so a row arriving between the state change and this effect
+  // is still matched against the selection the user actually made.
+  useEffect(() => {
+    conversationIdRef.current = conversation?.id ?? null;
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    activeProfileIdRef.current = activeProfileId;
+  }, [activeProfileId]);
+
   useEffect(() => {
     if (!cloud.configured || !ownerId) return undefined;
     let active = true;
@@ -961,15 +1243,19 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
         if (!current?.id) {
           setMessages([]);
           setChatDispatch([]);
+          setBinding({ binding: null, checkpoint: null });
           return;
         }
-        const [nextMessages, nextDispatch] = await Promise.all([
+        conversationIdRef.current = current.id;
+        const [nextMessages, nextDispatch, nextBinding] = await Promise.all([
           loadMessages(current.id),
           loadChatDispatch(current.id),
+          loadConversationBinding(current.id),
         ]);
         if (!active) return;
         setMessages(nextMessages);
         setChatDispatch(nextDispatch);
+        setBinding(nextBinding);
       } catch (conversationError) {
         if (active) setError(conversationError.message);
       }
@@ -1031,12 +1317,43 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
 
   const activeProfile = roster.find((profile) => profile.id === activeProfileId) ?? roster[0];
 
+  // What the chat header may honestly claim. Both are derived from rows the
+  // browser actually read back — a connector heartbeat, a binding, a checkpoint,
+  // a discovery scan — so an absent signal renders as "not known" rather than as
+  // a working Telegram bridge.
+  const telegramDiscovery = useMemo(
+    () => describeTelegramDiscovery({
+      sessions: telegram.sessions,
+      scans: telegram.scans,
+      executionProfileId: availabilityFor(activeProfileId).executionProfileId,
+      connectorHealth: connector.health,
+    }),
+    [telegram.sessions, telegram.scans, availabilityFor, activeProfileId, connector.health],
+  );
+
+  const conversationBridge = useMemo(
+    () => describeConversationBridge({
+      conversation,
+      binding: binding.binding,
+      checkpoint: binding.checkpoint,
+      connectorHealth: connector.health,
+      discovery: telegramDiscovery,
+    }),
+    [conversation, binding.binding, binding.checkpoint, connector.health, telegramDiscovery],
+  );
+
   useEffect(() => {
     if (!ownerId || passwordSetup || !onCloudSnapshot) return;
     onCloudSnapshot({
       ownerId,
       roster,
       connector,
+      // Publishing the read-back time and the read failure alongside the rows
+      // is what lets a consuming surface distinguish "empty", "not read yet",
+      // "read and failed" and "read a while ago" instead of collapsing all four
+      // into an empty list.
+      syncedAt,
+      error,
       workItems,
       archive,
       meetings,
@@ -1046,7 +1363,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       runtime: runtimeProjection,
       revision: cloudRevision,
     });
-  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, documentTrees, organizationState, runtimeProjection, cloudRevision]);
+  }, [ownerId, passwordSetup, onCloudSnapshot, roster, connector, workItems, archive, meetings, artifacts, documentTrees, organizationState, runtimeProjection, cloudRevision, syncedAt, error]);
 
   // ---- auth transition -----------------------------------------------------
   // Every screen before this one is a short card and this one is a long
@@ -1071,9 +1388,11 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
         loadMessages(nextConversation.id),
         loadChatDispatch(nextConversation.id),
       ]);
+      conversationIdRef.current = nextConversation.id;
       setConversation(nextConversation);
       setMessages(nextMessages);
       setChatDispatch(nextDispatch);
+      setBinding(await loadConversationBinding(nextConversation.id));
       setError("");
     } catch (selectError) {
       setError(selectError.message);
@@ -1087,10 +1406,13 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     setBusy(true);
     try {
       const created = await startConversation({ ownerId, profileId: activeProfileId });
+      conversationIdRef.current = created.id;
       setConversations((current) => [created, ...current]);
       setConversation(created);
       setMessages([]);
       setChatDispatch([]);
+      // A conversation that was created one line ago has no channel binding.
+      setBinding({ binding: null, checkpoint: null });
       setError("");
     } catch (createError) {
       setError(createError.message);
@@ -1119,6 +1441,78 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       setBusy(false);
     }
   }, [conversation]);
+
+  /**
+   * Ask for one connector-reported Telegram session to be connected to the open
+   * conversation.
+   *
+   * What this produces is a request. The API can only write `pending`, and the
+   * readback below shows exactly that, so the screen never claims a connection
+   * the connector has not yet proved.
+   */
+  const handleConnectTelegram = useCallback(async (session) => {
+    const conversationId = conversationIdRef.current;
+    if (!conversationId || !session?.hermes_session_id) return;
+    setBusy(true);
+    try {
+      await requestConversationBinding({
+        conversationId,
+        hermesSessionId: session.hermes_session_id,
+        channelAccountId: session.channel_account_id,
+        externalConversationId: session.external_conversation_id,
+      });
+      setBinding(await loadConversationBinding(conversationId));
+      setError("");
+    } catch (connectError) {
+      setError(connectError.message);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  /** Retry a refused verification. Same request, so the same row is reused. */
+  const handleRetryTelegram = useCallback(async () => {
+    const conversationId = conversationIdRef.current;
+    const current = binding.binding;
+    if (!conversationId || !current) return;
+    setBusy(true);
+    try {
+      await requestConversationBinding({
+        conversationId,
+        hermesSessionId: current.hermes_session_id,
+        channelAccountId: current.channel_account_id,
+        externalConversationId: current.external_conversation_id,
+        action: "retry",
+      });
+      setBinding(await loadConversationBinding(conversationId));
+      setError("");
+    } catch (retryError) {
+      setError(retryError.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [binding.binding]);
+
+  /**
+   * Disconnect. This unbinds the channel and keeps every message: the timeline
+   * is re-read afterwards precisely so the user can see that nothing was lost.
+   */
+  const handleDisconnectTelegram = useCallback(async () => {
+    const conversationId = conversationIdRef.current;
+    const current = binding.binding;
+    if (!conversationId || !current?.id) return;
+    setBusy(true);
+    try {
+      await cancelConversationBinding({ bindingId: current.id, reason: "owner disconnected from the chat panel" });
+      await refreshConversation(conversationId);
+      await refreshConversationList();
+      setError("");
+    } catch (disconnectError) {
+      setError(disconnectError.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [binding.binding, refreshConversation, refreshConversationList]);
 
   const handleFile = useCallback(async ({ title, brief, profileId }) => {
     if (!ownerId) return;
@@ -1265,7 +1659,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   }[surface] ?? ["Bibi Workspace", "실제 Bibi 조직 워크스페이스입니다."];
 
   const surfaceBody = (() => {
-    if (surface === "meeting") return <BibiMeetingSurface roster={roster} availabilityFor={availabilityFor} refreshKey={cloudRevision} />;
+    if (surface === "meeting") return <BibiMeetingSurface roster={roster} availabilityFor={availabilityFor} meetings={meetings} followups={meetingFollowups} onRefresh={refresh} onCompleteMeeting={completeCloudMeeting} onCreateFollowup={createFollowup} />;
     if (surface === "data") return <BibiDataRoomSurface roster={roster} refreshKey={cloudRevision} />;
     if (surface === "sessions") return <BibiArchiveSurface roster={roster} refreshKey={cloudRevision} />;
     if (surface === "office" || surface === "team") {
@@ -1275,7 +1669,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
       return (
         <div className="bibi-layout bibi-layout-chat">
           <RosterRail roster={roster} activeProfileId={activeProfileId} availabilityFor={availabilityFor} onSelect={setActiveProfileId} />
-          <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} conversation={conversation} conversations={conversations} messages={messages} dispatch={chatDispatch} onSend={handleSend} onSelectConversation={handleSelectConversation} onNewConversation={handleNewConversation} busy={busy} error={error} />
+          <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} conversation={conversation} conversations={conversations} messages={messages} dispatch={chatDispatch} bridge={conversationBridge} discovery={telegramDiscovery} onSend={handleSend} onSelectConversation={handleSelectConversation} onNewConversation={handleNewConversation} onConnectTelegram={handleConnectTelegram} onRetryTelegram={handleRetryTelegram} onDisconnectTelegram={handleDisconnectTelegram} busy={busy} error={error} />
         </div>
       );
     }
@@ -1291,7 +1685,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     return (
       <div className="bibi-layout">
         <RosterRail roster={roster} activeProfileId={activeProfileId} availabilityFor={availabilityFor} onSelect={setActiveProfileId} />
-        <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} conversation={conversation} conversations={conversations} messages={messages} dispatch={chatDispatch} onSend={handleSend} onSelectConversation={handleSelectConversation} onNewConversation={handleNewConversation} busy={busy} error={error} />
+        <ChatPanel profile={activeProfile} availability={availabilityFor(activeProfileId)} conversation={conversation} conversations={conversations} messages={messages} dispatch={chatDispatch} bridge={conversationBridge} discovery={telegramDiscovery} onSend={handleSend} onSelectConversation={handleSelectConversation} onNewConversation={handleNewConversation} onConnectTelegram={handleConnectTelegram} onRetryTelegram={handleRetryTelegram} onDisconnectTelegram={handleDisconnectTelegram} busy={busy} error={error} />
         <aside className="bibi-side">
           <WorkIntake roster={roster} defaultProfileId={activeProfileId} availabilityFor={availabilityFor} onFile={handleFile} busy={busy} />
           <WorkBoard workItems={workItems} detail={openWorkDetail} openId={openWorkId} onOpen={setOpenWorkId} onCancel={handleCancel} />

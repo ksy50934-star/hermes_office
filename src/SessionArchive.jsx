@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { decodeHermesText, hermesFetch, isMeetingSession, loadArchivedSessions, loadProfileSessions, loadSessionMessages } from "./hermes.js";
 import { TEAM_META } from "./officeData.js";
 import { sanitizeArchiveMessages, sanitizeArchiveText } from "./archiveContracts.js";
+import BibiMeetingRecord from "./BibiMeetingRecord.jsx";
 
 const MEETING_STORAGE_KEY = "hermes-office-meetings";
 const ARCHIVE_CACHE_KEY = "hermes-office-archive-snapshot";
+const EMPTY_FOLLOWUPS = new Map();
 function cleanText(value) {
   return sanitizeArchiveText(decodeHermesText(value ?? ""));
 }
@@ -93,28 +95,48 @@ export default function SessionArchive({
   onTerminal,
   onFollowupMeeting,
 }) {
-  const [archiveSnapshot] = useState(() => loadArchiveSnapshot());
+  // The cloud archive has one source: the owner's durable snapshot. The
+  // browser-local meeting list and the legacy session cache belong to the
+  // Hermes-backed archive, and seeding a cloud view from them would put a
+  // record on screen that no longer exists in — or never was in — the account
+  // being viewed.
+  const [archiveSnapshot] = useState(() => (archiveAdapter ? null : loadArchiveSnapshot()));
   const [sessions, setSessions] = useState(() => archiveSnapshot?.sessions ?? []);
-  const [meetings, setMeetings] = useState(() => archiveSnapshot?.meetings ?? loadMeetings());
+  const [meetings, setMeetings] = useState(() => archiveSnapshot?.meetings ?? (archiveAdapter ? [] : loadMeetings()));
   const [selected, setSelected] = useState(() => archiveSnapshot?.sessions?.[0] ?? archiveSnapshot?.meetings?.[0] ?? null);
   const [messages, setMessages] = useState([]);
   const [type, setType] = useState("direct");
   const [filter, setFilter] = useState("all");
-  const [loading, setLoading] = useState(() => !(archiveSnapshot?.sessions?.length || archiveSnapshot?.meetings?.length));
+  // Loading is derived, not set from inside the effect: a request is identified
+  // by the adapter and list it is for, and the view is loading until the result
+  // for that exact request has landed. Setting it synchronously in the effect
+  // instead would re-render the whole archive twice on every list switch.
+  const [settledRequest, setSettledRequest] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [sessionLimit, setSessionLimit] = useState(80);
   const [messageLimit, setMessageLimit] = useState(80);
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
 
+  // A request is identified by which source is being read and what for; the
+  // view is loading until the result for that exact request has settled. The
+  // cached snapshot still short-circuits the legacy read, exactly as before:
+  // there is something real on screen, so there is nothing to wait for.
+  const hasSnapshot = Boolean(archiveSnapshot?.sessions?.length || archiveSnapshot?.meetings?.length);
+  const requestKey = archiveAdapter
+    ? `cloud:${type}`
+    : profileNames.length ? `legacy:${profileNames.join(",")}` : null;
+  const loading = requestKey !== null
+    && settledRequest !== requestKey
+    && !(hasSnapshot && !archiveAdapter);
+
   useEffect(() => {
     if (!archiveAdapter) return undefined;
     let active = true;
-    setLoading(true);
-    setError("");
     archiveAdapter.list()
       .then(({ sessions: nextSessions, meetings: nextMeetings }) => {
         if (!active) return;
+        setError("");
         setSessions(nextSessions);
         setMeetings(nextMeetings);
         setSelected((current) => {
@@ -123,9 +145,9 @@ export default function SessionArchive({
         });
       })
       .catch((loadError) => { if (active) setError(loadError.message); })
-      .finally(() => { if (active) setLoading(false); });
+      .finally(() => { if (active) setSettledRequest(requestKey); });
     return () => { active = false; };
-  }, [archiveAdapter, type]);
+  }, [archiveAdapter, type, requestKey]);
 
   useEffect(() => {
     if (archiveAdapter || !profileNames.length) return undefined;
@@ -145,8 +167,8 @@ export default function SessionArchive({
         setSelected((current) => current ?? direct[0] ?? null);
       })
       .catch((loadError) => setError(loadError.message))
-      .finally(() => setLoading(false));
-  }, [archiveAdapter, profileNames]);
+      .finally(() => setSettledRequest(requestKey));
+  }, [archiveAdapter, profileNames, requestKey]);
 
   useEffect(() => {
     if (archiveAdapter || type !== "meeting" || !selected?.legacySessions?.length || selected.entries.length) return undefined;
@@ -352,6 +374,17 @@ export default function SessionArchive({
                   </article>
                 </div>
               )}
+              {selectedMeeting.record ? (
+                <BibiMeetingRecord
+                  record={selectedMeeting.record}
+                  candidates={selectedMeeting.followupCandidates ?? []}
+                  followups={archiveAdapter?.followups ?? EMPTY_FOLLOWUPS}
+                  profileName={(profileId) => TEAM_META[profileId]?.name ?? profileId}
+                  onCreateFollowup={archiveAdapter?.createFollowup
+                    ? (candidate) => archiveAdapter.createFollowup(selectedMeeting, candidate)
+                    : undefined}
+                />
+              ) : null}
               <div className="archive-transcript meeting-archive-transcript">
                 {selectedMeeting.entries.map((entry) => {
                   const speaker = TEAM_META[entry.profile] ?? TEAM_META.default;

@@ -32,7 +32,7 @@ import {
   validateLiveScreenScope,
 } from "./liveScreenSecurity.js";
 import { upgradeLiveScreenConnection } from "./liveScreenRelay.js";
-import { ORGANIZATION_VERSION, validateOrganizationNodes } from "./organizationHierarchy.js";
+import { ORGANIZATION_VERSION, organizationRequiresMigration, validateOrganizationNodes } from "./organizationHierarchy.js";
 import { authorizeAgentCalendarRequest, parseAgentCalendarQuery } from "./agentCalendarAccess.js";
 import {
   connectReservationGoogle,
@@ -867,13 +867,38 @@ function normalizeOrganizationState(value) {
   };
 }
 
-async function readOrganizationState() {
+async function readStoredOrganizationState() {
   try {
-    return normalizeOrganizationState(JSON.parse(await fs.readFile(organizationStatePath, "utf8")));
+    return JSON.parse(await fs.readFile(organizationStatePath, "utf8"));
   } catch (error) {
-    if (error.code === "ENOENT") return normalizeOrganizationState({});
+    if (error.code === "ENOENT") return null;
     throw error;
   }
+}
+
+async function readOrganizationState() {
+  return normalizeOrganizationState(await readStoredOrganizationState() ?? {});
+}
+
+/**
+ * Rewrite a chart stored under an older organization version so the file on
+ * disk stops carrying v1 departments, instead of being re-migrated on every
+ * read. The revision is deliberately left alone: this changes which department
+ * a member is filed under, not who reports to whom, so an editor already
+ * holding `revision` keeps a valid compare-and-set base.
+ */
+async function migrateOrganizationStateFile() {
+  organizationStateWrite = organizationStateWrite.catch(() => {}).then(async () => {
+    const stored = await readStoredOrganizationState();
+    if (!stored) return;
+    if (Number(stored.version) === ORGANIZATION_VERSION && !organizationRequiresMigration(stored.nodes ?? [])) return;
+    const migrated = normalizeOrganizationState(stored);
+    await fs.mkdir(path.dirname(organizationStatePath), { recursive: true });
+    const temporaryPath = `${organizationStatePath}.${crypto.randomUUID()}.tmp`;
+    await fs.writeFile(temporaryPath, `${JSON.stringify(migrated, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await fs.rename(temporaryPath, organizationStatePath);
+  });
+  await organizationStateWrite;
 }
 
 async function updateOrganizationState({ baseRevision, nodes, actor }) {
@@ -912,6 +937,7 @@ async function updateOrganizationState({ baseRevision, nodes, actor }) {
 
 async function handleOrganizationBridge(request, response, url) {
   if (request.method === "GET" && url.pathname === "/bridge/organization") {
+    await migrateOrganizationStateFile();
     sendJson(response, 200, await readOrganizationState(), { "Cache-Control": "no-store" });
     return;
   }

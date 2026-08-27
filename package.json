@@ -27,6 +27,7 @@
     "ws": "8.21.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
     "@eslint/js": "latest",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",

@@ -9,7 +9,19 @@ import {
   resolveProfileMeta,
   ROOMS,
 } from "./officeData.js";
-import { MISSION_STATUS } from "./operationsData.js";
+import { describeRnbWork, groupMissionsByStatus } from "./bibi/officeProjection.js";
+import {
+  activityHasWork,
+  activityHeadline,
+  missionOwnerLabel,
+  missionProgressLabel,
+  missionProgressPercent,
+  missionStatusLabel,
+  missionStatusTone,
+  missionSummary,
+  missionTitle,
+  missionUpdatedLabel,
+} from "./missionView.js";
 import {
   advanceOfficePoint,
   findOfficePath,
@@ -20,18 +32,6 @@ import {
 } from "./officeNavigation.js";
 import { useModalFocus } from "./useModalFocus.js";
 import { OFFICE_BRAND_NAME } from "./branding.js";
-
-const AGENT_ACTIVITY = {
-  default: "전체 미션 우선순위 조정",
-  "hermes-operations": "운영 일정 점검",
-  "hermes-brand": "브랜드 문구 검토",
-  "hermes-growth": "캠페인 전략 설계",
-  "hermes-content": "콘텐츠 카피 작성",
-  "hermes-creative": "산출물 품질 확인",
-  "hermes-customer": "고객 문의 분류",
-  "hermes-finance": "KPI 업데이트",
-  "hermes-technology": "Hermes 연결 감시",
-};
 
 function MobileOfficeHome({
   profiles,
@@ -49,7 +49,10 @@ function MobileOfficeHome({
 }) {
   const teamProfiles = profiles;
   const liveProfiles = teamProfiles.filter((profile) => agentActivities[profile.name]?.state === "meeting" || agentActivities[profile.name]?.view?.url);
-  const primaryMissions = missions.filter((mission) => mission.status !== "done").slice(0, 3);
+  // Everything that is actually still open, newest first. No cap: three slots
+  // filled from a list of two used to be padded, and a list of nine used to be
+  // silently truncated with nothing saying so.
+  const primaryMissions = missions.filter((mission) => mission.active !== false && !mission.terminal);
   const mobileRooms = ROOMS.filter((room) =>
     ["meeting", "content", "library", "desk", "control"].includes(room.id),
   );
@@ -90,7 +93,11 @@ function MobileOfficeHome({
             <button type="button" key={profile.name} onClick={() => onOpenChatDock(profile.name)}>
               <b style={{ "--avatar": meta.color }}>{meta.initials}</b>
               <strong>{meta.name}</strong>
-              <small>{activity?.text || meta.role}</small>
+              {/* The role is identity copy; it is only shown when there is no
+                  work to report, and it is not dressed up as an activity. */}
+              <small className={activityHasWork(activity) ? "" : "agent-idle-note"}>
+                {activityHasWork(activity) ? activityHeadline(activity) : meta.role}
+              </small>
               <i className={profile.gateway_running ? "online" : ""} />
             </button>
           );
@@ -110,7 +117,7 @@ function MobileOfficeHome({
               return (
                 <button type="button" key={profile.name} onClick={() => onOpenChatDock(profile.name)}>
                   <span style={{ "--avatar": meta.color }}>{meta.initials}</span>
-                  <div><strong>{meta.name}</strong><small>{activity?.text}</small></div>
+                  <div><strong>{meta.name}</strong><small>{activityHeadline(activity)}</small></div>
                   <b>{activity?.state === "meeting" ? "회의" : "화면"}</b>
                 </button>
               );
@@ -126,14 +133,25 @@ function MobileOfficeHome({
       <div className="mobile-mission-list">
         {primaryMissions.map((mission) => {
           const owner = resolveProfileMeta(profiles.find((profile) => profile.name === mission.owner) ?? mission.owner);
+          const percent = missionProgressPercent(mission);
           return (
             <button type="button" key={mission.id} onClick={() => onSelectAgent(mission.owner)}>
-              <div><strong>{mission.title}</strong><small>{owner.name} · {mission.progress}%</small></div>
-              <span><i style={{ width: `${mission.progress}%` }} /></span>
+              <div>
+                <strong>{missionTitle(mission)}</strong>
+                <small>{missionOwnerLabel(mission, owner.name)} · {missionStatusLabel(mission)}</small>
+                <em>{mission.statusMeaning}</em>
+              </div>
+              {percent == null
+                ? <b>{missionProgressLabel(mission)}</b>
+                : <span><i style={{ width: `${percent}%` }} /></span>}
             </button>
           );
         })}
-        {!primaryMissions.length && <p>진행 중인 업무가 없습니다.</p>}
+        {!primaryMissions.length && (
+          <p className="office-empty">
+            진행 중인 업무가 없습니다. 업무를 맡기면 여기에 실제 상태가 표시됩니다.
+          </p>
+        )}
       </div>
 
       <div className="mobile-section-heading">
@@ -186,12 +204,14 @@ function AgentConsole({ profileName, profiles, missions, sessions, activity, liv
       <div className="agent-console-body">
         {tab === "brief" && (
           <div className="agent-brief">
-            <span>CURRENT ACTIVITY</span>
-            <strong>{activity?.text || AGENT_ACTIVITY[profileName]}</strong>
-            <p>
-              {assigned[0]?.objective ??
-                `${meta.role} 담당 영역에서 새로운 요청을 기다리고 있습니다.`}
-            </p>
+            <span>지금 하는 일</span>
+            {/* Reads a work row or says there is none. There is no per-profile
+                stock sentence left in this path. */}
+            <strong className={activityHasWork(activity) ? "" : "agent-idle-note"}>
+              {activityHeadline(activity)}
+            </strong>
+            <p>{assigned[0] ? missionSummary(assigned[0]) : activity?.meaning
+              ?? `${meta.role} 담당 영역에 맡겨진 업무가 아직 없습니다.`}</p>
             <div className="agent-signal">
               <i className={profile?.gateway_running ? "online" : ""} />
               <span>Gateway</span>
@@ -208,16 +228,22 @@ function AgentConsole({ profileName, profiles, missions, sessions, activity, liv
         {tab === "live" && <LiveScreenPanel activity={activity} profileName={profileName} sessionId={liveSessionId} onFullscreen={onOpenLive} />}
         {tab === "tasks" && (
           <div className="agent-task-list">
-            {assigned.length ? assigned.map((mission) => (
-              <article key={mission.id}>
-                <span className={`status-pill ${MISSION_STATUS[mission.status].tone}`}>
-                  {MISSION_STATUS[mission.status].label}
-                </span>
-                <strong>{mission.title}</strong>
-                <div><i style={{ width: `${mission.progress}%` }} /></div>
-                <small>{mission.progress}% · {mission.due}</small>
-              </article>
-            )) : <p className="office-empty">배정된 미션이 없습니다.</p>}
+            {assigned.length ? assigned.map((mission) => {
+              const percent = missionProgressPercent(mission);
+              return (
+                <article key={mission.id}>
+                  <span className={`status-pill ${missionStatusTone(mission)}`}>
+                    {missionStatusLabel(mission)}
+                  </span>
+                  <strong>{missionTitle(mission)}</strong>
+                  <p className="agent-task-meaning">{mission.statusMeaning}</p>
+                  {percent != null && <div><i style={{ width: `${percent}%` }} /></div>}
+                  <small>{missionProgressLabel(mission)} · {missionUpdatedLabel(mission)}</small>
+                  {mission.blockedReason && <small className="agent-task-blocked">보류 사유 · {mission.blockedReason}</small>}
+                  {mission.error && <small className="agent-task-error">오류 · {mission.error}</small>}
+                </article>
+              );
+            }) : <p className="office-empty">이 구성원에게 맡긴 업무가 아직 없습니다.</p>}
           </div>
         )}
         {tab === "history" && (
@@ -225,7 +251,7 @@ function AgentConsole({ profileName, profiles, missions, sessions, activity, liv
             {sessions.slice(0, 4).map((session) => (
               <article key={session.id}>
                 <small>{session.source ?? "local"}</small>
-                <strong>{session.title || "제목 없는 대화"}</strong>
+                <strong>{session.title || "제목이 저장되지 않은 대화"}</strong>
                 <span>{session.message_count} messages</span>
               </article>
             ))}
@@ -242,13 +268,12 @@ function AgentConsole({ profileName, profiles, missions, sessions, activity, liv
 }
 
 function MissionBoard({ missions, onClose, onMoveMission, onSelectAgent }) {
-  const columns = [
-    ["queued", "대기", "BACKLOG"],
-    ["working", "진행 중", "IN PROGRESS"],
-    ["approval", "승인 대기", "REVIEW"],
-    ["done", "완료", "DONE"],
-  ];
+  // One column per real status, named after that status. The four-column
+  // 대기/진행 중/승인 대기/완료 board was a second vocabulary that merged
+  // 실행 준비 with 실행 중 and presented 실패 as 승인 대기.
+  const columns = useMemo(() => groupMissionsByStatus(missions), [missions]);
   const [draggedId, setDraggedId] = useState("");
+  const [moveError, setMoveError] = useState("");
   const dialogRef = useModalFocus(true, onClose);
 
   return (
@@ -261,51 +286,73 @@ function MissionBoard({ missions, onClose, onMoveMission, onSelectAgent }) {
           </div>
           <button type="button" onClick={onClose}>닫기 ESC</button>
         </header>
+        {moveError && <p className="mission-board-error" role="alert">{moveError}</p>}
         <div className="kanban-grid">
-          {columns.map(([status, label, english]) => {
-            const items = missions.filter((mission) => mission.status === status);
+          {columns.map((column) => {
+            const items = column.missions;
             return (
               <section
-                key={status}
-                className={`kanban-column ${status}`}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
-                  if (draggedId) onMoveMission(draggedId, status);
+                key={column.status}
+                className={`kanban-column ${column.status}${column.manual ? "" : " display-only"}`}
+                aria-label={column.manual
+                  ? `${column.label} 상태`
+                  : `${column.label} 상태, 실제 실행으로만 바뀌며 수동 이동 불가`}
+                // Only the columns an owner-scoped API call can actually reach
+                // accept a drop. Offering the others would promise a transition
+                // the server refuses.
+                onDragOver={column.manual ? (event) => event.preventDefault() : undefined}
+                onDrop={column.manual ? () => {
+                  if (draggedId) {
+                    setMoveError("");
+                    Promise.resolve(onMoveMission(draggedId, column.status))
+                      .catch((error) => setMoveError(error?.message ?? String(error)));
+                  }
                   setDraggedId("");
-                }}
+                } : undefined}
               >
                 <div className="kanban-heading">
-                  <div><small>{english}</small><strong>{label}</strong></div>
+                  <div>
+                    <small>{column.english}</small>
+                    <strong>{column.label}</strong>
+                    <em>{column.meaning}</em>
+                  </div>
                   <b>{items.length}</b>
                 </div>
                 <div className="kanban-cards">
                   {items.map((mission) => {
                     const owner = resolveProfileMeta(mission.owner);
+                    const percent = missionProgressPercent(mission);
+                    // Terminal work is immutable: the lifecycle reducer refuses
+                    // every event on it, so it is not draggable either.
+                    const movable = column.manual && !mission.terminal;
                     return (
                       <article
                         key={mission.id}
-                        draggable
-                        onDragStart={() => setDraggedId(mission.id)}
-                        onDragEnd={() => setDraggedId("")}
+                        draggable={movable}
+                        onDragStart={movable ? () => setDraggedId(mission.id) : undefined}
+                        onDragEnd={movable ? () => setDraggedId("") : undefined}
                       >
-                        <span>{mission.priority === "high" ? "HIGH PRIORITY" : mission.due}</span>
-                        <strong>{mission.title}</strong>
-                        <p>{mission.objective}</p>
-                        <div className="kanban-progress"><i style={{ width: `${mission.progress}%` }} /></div>
+                        <span>{mission.priority === "high" ? "우선 확인" : missionUpdatedLabel(mission)}</span>
+                        <strong>{missionTitle(mission)}</strong>
+                        <p>{missionSummary(mission)}</p>
+                        {percent != null && <div className="kanban-progress"><i style={{ width: `${percent}%` }} /></div>}
+                        <small>{missionProgressLabel(mission)}</small>
+                        {mission.blockedReason && <small className="kanban-card-blocked">보류 사유 · {mission.blockedReason}</small>}
+                        {mission.error && <small className="kanban-card-error">오류 · {mission.error}</small>}
                         <button type="button" onClick={() => onSelectAgent(mission.owner)}>
                           <span style={{ "--avatar": owner.color }}>{owner.initials}</span>
-                          {owner.name}
+                          {missionOwnerLabel(mission, owner.name)}
                         </button>
                       </article>
                     );
                   })}
-                  {!items.length && <div className="kanban-empty">여기로 카드를 이동하세요</div>}
+                  {!items.length && <div className="kanban-empty">{column.manualNote}</div>}
                 </div>
               </section>
             );
           })}
         </div>
-        <footer>카드를 드래그해 상태를 변경할 수 있습니다.</footer>
+        <footer>담당 배정, 보류, 취소만 직접 옮길 수 있습니다. 실행 준비·실행 중·완료·실패는 로컬 Mac의 실제 실행 결과로만 바뀝니다.</footer>
       </section>
     </div>
   );
@@ -1087,11 +1134,15 @@ function LiveOfficeMap({
             ? "회의 중"
             : activity?.view?.url
               ? "화면 공유"
-              : missions.some((mission) => mission.owner === profile.name && mission.status === "working")
-                ? "작업 중"
-                : profile.gateway_running
-                  ? "대기"
-                  : "오프라인";
+              // "실행 중" means the connector reported this profile actually
+              // running something, not merely that it owns an open item.
+              : missions.some((mission) => mission.owner === profile.name && mission.status === "running")
+                ? "실행 중"
+                  : missions.some((mission) => mission.owner === profile.name && !mission.terminal)
+                    ? "업무 배정됨"
+                    : profile.gateway_running
+                      ? "대기"
+                      : "오프라인";
           return (
             <button
               type="button"
@@ -1139,82 +1190,119 @@ function LiveOfficeMap({
   );
 }
 
-function InterventionPanel({ missions, approvals, onOpenOfficePanel }) {
-  const workingMissions = missions.filter((mission) => mission.status !== "done").slice(0, 4);
-  const todayItems = [
-    ...approvals.slice(0, 2).map((approval) => ({
-      id: approval.id,
-      title: approval.title,
-      meta: approval.requester ? resolveProfileMeta(approval.requester).name : "검토",
-      type: "approvals",
-    })),
-    ...workingMissions.slice(0, 3).map((mission) => ({
-      id: mission.id,
-      title: mission.title,
-      meta: resolveProfileMeta(mission.owner).name,
-      type: "today",
-    })),
-  ].slice(0, 3);
+/**
+ * The right-hand panel.
+ *
+ * Every row here is one real work item, it says in plain Korean why it is on
+ * screen, and clicking it opens that exact item. What it replaced drew five
+ * fixed category buttons — 브랜드/기획, 콘텐츠 제작, 운영/관리, 고객/지원,
+ * 재무/회계 — bucketed work into them by `index % 5`, and floored every count at
+ * one with `Math.max(1, …)`. On a workspace with two work items that rendered
+ * five categories each claiming at least one piece of work, none of which
+ * existed and none of which led anywhere.
+ */
+function InterventionPanel({ rnb: projected, approvals, onOpenOfficePanel, onOpenWorkItem }) {
+  // A caller that has not projected anything yet gets the explicit loading
+  // shape, never an empty list that would read as "nothing to do".
+  const rnb = projected ?? describeRnbWork(null);
+  const openItem = (item) => {
+    if (item.navigation?.workItemId && onOpenWorkItem) {
+      onOpenWorkItem(item.navigation);
+      return;
+    }
+    onOpenOfficePanel({ type: "work", focusId: item.id });
+  };
+
+  const WorkRow = ({ item }) => (
+    <button
+      type="button"
+      key={item.id}
+      className={`command-work-row tone-${item.tone}`}
+      onClick={() => openItem(item)}
+    >
+      <i />
+      <span>
+        <strong>{item.titleMissing ? "제목이 비어 있는 업무" : item.title}</strong>
+        {/* Why this row is here, in words, next to every row. */}
+        <small>{item.meaning}</small>
+        <em>{item.statusLabel} · {item.assigneeLabel}</em>
+        {item.blockedReason && <small className="command-work-blocked">보류 사유 · {item.blockedReason}</small>}
+        {item.error && <small className="command-work-error">오류 · {item.error}</small>}
+      </span>
+    </button>
+  );
 
   return (
     <aside className="command-intervention-panel">
+      {rnb.notice && <p className="command-panel-notice" role="status">{rnb.notice}</p>}
+
       <section>
         <div className="command-panel-heading">
-          <strong>오늘 확인할 일</strong>
-          <b>{todayItems.length}</b>
+          <strong>{rnb.headline}</strong>
+          <b>{rnb.items.length}</b>
         </div>
+        <p className="command-panel-detail">{rnb.detail}</p>
+
+        {rnb.state === "loading" && (
+          <p className="command-panel-state" role="status">업무 기록을 읽는 중입니다.</p>
+        )}
+        {rnb.state === "error" && (
+          <p className="command-panel-state is-error" role="alert">{rnb.detail}</p>
+        )}
+
         <div className="command-action-list">
-          {todayItems.map((item) => (
-            <button type="button" key={item.id} onClick={() => onOpenOfficePanel({ type: item.type, focusId: item.id })}>
-              <i />
-              <strong>{item.title}</strong>
-              <span>{item.meta}</span>
-            </button>
-          ))}
-          {!todayItems.length && (
+          {/* Exactly the active work that exists. No padding, no truncation. */}
+          {rnb.items.map((item) => <WorkRow key={item.id} item={item} />)}
+        </div>
+
+        {rnb.empty && (
+          <div className="command-panel-empty">
+            <strong>{rnb.empty.title}</strong>
+            <p>{rnb.empty.detail}</p>
             <button type="button" onClick={() => onOpenOfficePanel({ type: "work" })}>
-              <i />
-              <strong>진행 업무를 확인하세요</strong>
-              <span>업무 보드</span>
+              {rnb.empty.action.label}
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </section>
-      <section>
-        <div className="command-panel-heading">
-          <strong>진행 중 업무</strong>
-          <b>{workingMissions.length}</b>
-        </div>
-        <div className="command-work-summary">
-          {["브랜드/기획", "콘텐츠 제작", "운영/관리", "고객/지원", "재무/회계"].map((label, index) => (
-            <button type="button" key={label} onClick={() => onOpenOfficePanel({ type: "work", filter: label })}>
-              <i />
-              <span>{label}</span>
-              <b>{Math.max(1, workingMissions.filter((_, itemIndex) => itemIndex % 5 === index).length)}</b>
-            </button>
-          ))}
-        </div>
-      </section>
+
+      {rnb.completed.length > 0 && (
+        <section>
+          <div className="command-panel-heading">
+            <strong>최근 끝난 업무</strong>
+            <b>{rnb.completed.length}</b>
+          </div>
+          <p className="command-panel-detail">종료된 업무는 다시 이동하거나 취소할 수 없습니다.</p>
+          <div className="command-action-list">
+            {rnb.completed.map((item) => <WorkRow key={item.id} item={item} />)}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="command-panel-heading">
           <strong>승인 대기</strong>
           <b>{approvals.length}</b>
         </div>
         <div className="command-approval-list">
-          {(approvals.length ? approvals : workingMissions.slice(0, 3)).map((item) => {
+          {/* Approvals only. Filling this list with in-progress work when no
+              approval existed made ordinary work look like it needed a
+              decision. */}
+          {approvals.map((item) => {
             const ownerName = resolveProfileMeta(item.requester ?? item.owner).name;
             return (
               <button
                 type="button"
                 key={item.id}
-                onClick={() => onOpenOfficePanel({ type: approvals.length ? "approvals" : "work", focusId: item.id })}
+                onClick={() => onOpenOfficePanel({ type: "approvals", focusId: item.id })}
               >
                 <i />
                 <span><strong>{item.title}</strong><small>{ownerName}</small></span>
-                <em>{item.risk ?? (item.priority === "high" ? "긴급" : "보통")}</em>
+                <em>{item.risk ?? "보통"}</em>
               </button>
             );
           })}
+          {!approvals.length && <p className="command-panel-state">대표 확인이 필요한 요청이 없습니다.</p>}
         </div>
       </section>
     </aside>
@@ -1223,8 +1311,8 @@ function InterventionPanel({ missions, approvals, onOpenOfficePanel }) {
 
 function OfficeInsightModal({ panel, missions, approvals, onClose, onSelectAgent, onApprovalDecision }) {
   const dialogRef = useModalFocus(true, onClose);
-  const workingMissions = missions.filter((mission) => mission.status !== "done");
-  const focusMission = workingMissions.find((mission) => mission.id === panel?.focusId);
+  const workingMissions = missions.filter((mission) => !mission.terminal);
+  const focusMission = missions.find((mission) => mission.id === panel?.focusId);
   const focusApproval = approvals.find((approval) => approval.id === panel?.focusId);
   const visibleMissions = focusMission ? [focusMission] : workingMissions.slice(0, 8);
   const visibleApprovals = focusApproval ? [focusApproval] : approvals.slice(0, 8);
@@ -1271,14 +1359,21 @@ function OfficeInsightModal({ panel, missions, approvals, onClose, onSelectAgent
               <strong>진행 업무</strong>
               {visibleMissions.length ? visibleMissions.map((mission) => {
                 const owner = resolveProfileMeta(mission.owner);
+                const percent = missionProgressPercent(mission);
                 return (
                   <article className="office-insight-card mission" key={mission.id}>
-                    <small>{owner.name} · {mission.status}</small>
-                    <h4>{mission.title}</h4>
-                    <p>{mission.description ?? "담당자의 작업 상태를 확인하고 바로 대화를 이어갈 수 있습니다."}</p>
-                    <div className="office-insight-progress"><i style={{ width: `${Math.min(100, Math.max(0, mission.progress ?? 0))}%` }} /></div>
+                    <small>{missionOwnerLabel(mission, owner.name)} · {missionStatusLabel(mission)}</small>
+                    <h4>{missionTitle(mission)}</h4>
+                    <p>{missionSummary(mission)}</p>
+                    {/* Drawn only when a checklist measured it; an empty bar
+                        would read as "0% done" rather than "not measured". */}
+                    {percent != null && (
+                      <div className="office-insight-progress"><i style={{ width: `${percent}%` }} /></div>
+                    )}
+                    {mission.blockedReason && <p className="office-insight-blocked">보류 사유 · {mission.blockedReason}</p>}
+                    {mission.error && <p className="office-insight-error">오류 · {mission.error}</p>}
                     <footer>
-                      <span>{mission.progress ?? 0}%</span>
+                      <span>{missionProgressLabel(mission)} · {missionUpdatedLabel(mission)}</span>
                       <button type="button" onClick={() => onSelectAgent(mission.owner)}>담당자 보기</button>
                     </footer>
                   </article>
@@ -1296,6 +1391,13 @@ export default function HermesOffice({
   workspace,
   missions,
   approvals,
+  /**
+   * The canonical right-hand-panel projection from `describeRnbWork`. Passed in
+   * rather than derived here so the Office, the panel and the board are all
+   * reading the same filtered work.
+   */
+  rnb,
+  onOpenWorkItem,
   focusedRoom,
   focusedRoomContext,
   onOpenCommand,
@@ -1326,7 +1428,7 @@ export default function HermesOffice({
   const [officeLiveActivities, setOfficeLiveActivities] = useState({});
   const [officeLiveSessionIds, setOfficeLiveSessionIds] = useState({});
   const [roomFocus, setRoomFocus] = useState(focusedRoom ?? "");
-  const activeMissions = missions.filter((mission) => mission.status === "working").length;
+  const activeMissions = missions.filter((mission) => !mission.terminal).length;
   const online = profiles.filter((profile) => profile.gateway_running).length;
   const sessions = useMemo(() => workspace?.sessions ?? [], [workspace?.sessions]);
   const observedLiveProfile = officeChatAgent || fullscreenLiveAgent || selectedAgent;
@@ -1538,9 +1640,10 @@ export default function HermesOffice({
           />
         </div>
         <InterventionPanel
-          missions={missions}
+          rnb={rnb}
           approvals={approvals}
           onOpenOfficePanel={setOfficePanel}
+          onOpenWorkItem={onOpenWorkItem}
         />
       </main>
 

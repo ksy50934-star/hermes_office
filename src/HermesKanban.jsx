@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hermesFetch } from "./hermes.js";
 import {
   normalizeOfficeBoard,
@@ -6,22 +6,26 @@ import {
   officialCreateTaskPayload,
   patchOfficeTaskFromLatest,
 } from "./kanbanContracts.js";
+import { canMoveBoardTask } from "./bibi/kanbanMovePolicy.js";
 import { TEAM_META } from "./officeData.js";
 import { useModalFocus } from "./useModalFocus.js";
 
-const COLUMNS = [
-  ["triage", "분류", "TRIAGE"],
-  ["todo", "할 일", "TODO"],
-  ["scheduled", "예약됨", "SCHEDULED"],
-  ["ready", "실행 준비", "READY"],
-  ["running", "진행 중", "RUNNING"],
-  ["blocked", "멈춤", "BLOCKED"],
-  ["review", "검토", "REVIEW"],
-  ["done", "완료", "DONE"],
+/**
+ * The legacy Hermes board's own columns. Used only when no cloud adapter is
+ * attached; the cloud board supplies canonical columns instead, so `failed` is
+ * never shown under a 검토 heading and `leased` is never merged into 진행 중.
+ */
+const HERMES_COLUMNS = [
+  { status: "triage", label: "분류", english: "TRIAGE", manual: true },
+  { status: "todo", label: "할 일", english: "TODO", manual: true },
+  { status: "scheduled", label: "예약됨", english: "SCHEDULED", manual: true },
+  { status: "ready", label: "실행 준비", english: "READY", manual: true },
+  { status: "running", label: "진행 중", english: "RUNNING", manual: true },
+  { status: "blocked", label: "멈춤", english: "BLOCKED", manual: true },
+  { status: "review", label: "검토", english: "REVIEW", manual: false },
+  { status: "done", label: "완료", english: "DONE", manual: true },
 ];
 
-const STATUS_LABEL = Object.fromEntries(COLUMNS.map(([id, label]) => [id, label]));
-const BOARD_CACHE_KEY = "hermes-office-kanban-board";
 const DONE_ARCHIVE_DAYS = 7;
 const DONE_ARCHIVE_MS = DONE_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
 
@@ -75,24 +79,6 @@ const MOVE_POLICIES = {
     event: "업무가 완료 처리되었습니다.",
   },
 };
-
-function loadCachedBoard() {
-  try {
-    const cached = JSON.parse(window.localStorage.getItem(BOARD_CACHE_KEY) || "null");
-    if (!cached?.board || Date.now() - Number(cached.savedAt ?? 0) > 10 * 60 * 1000) return { columns: [] };
-    return cached.board;
-  } catch {
-    return { columns: [] };
-  }
-}
-
-function saveCachedBoard(board) {
-  try {
-    window.localStorage.setItem(BOARD_CACHE_KEY, JSON.stringify({ board, savedAt: Date.now() }));
-  } catch {
-    // The live board remains available even if local storage is blocked.
-  }
-}
 
 function taskStatus(task) {
   return task.status ?? task.column ?? "todo";
@@ -153,7 +139,7 @@ function taskPrompt(task, intent, extra = "") {
     "[업무보드 Task]",
     `업무명: ${task.title}`,
     `담당자: ${owner}`,
-    `현재 상태: ${STATUS_LABEL[taskStatus(task)] ?? taskStatus(task)}`,
+    `현재 상태: ${task.statusLabel ?? taskStatus(task)}`,
     task.body ? `설명: ${task.body}` : "",
     task.metadata?.meeting_topic ? `관련 회의: ${task.metadata.meeting_topic}` : "",
     extra ? `추가 지시: ${extra}` : "",
@@ -205,9 +191,26 @@ function emptyMoveForm(task) {
   };
 }
 
-export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = null }) {
-  const [board, setBoard] = useState(loadCachedBoard);
-  const [loading, setLoading] = useState(() => !loadCachedBoard().columns?.length);
+export default function HermesKanban({
+  onOpenAgent,
+  onStartMeeting,
+  adapter = null,
+  /** Bumped by every realtime workspace event, so the board re-reads at once. */
+  revision = 0,
+  connectorHealth = null,
+  focusTaskId = "",
+  onFocusHandled,
+}) {
+  // No local cache. It was keyed the same for the legacy and the cloud board, so
+  // the first paint after switching modes showed the other mode's cards, and a
+  // cache hit also decided the initial `loading` flag — a card list and a
+  // loading flag disagreeing is exactly the race this screen had.
+  const [board, setBoard] = useState({ columns: [] });
+  // Whether a first read has ever completed. Separate from "a read is in
+  // flight": once cards exist they stay on screen through every later refresh,
+  // so a background poll can never cover a loaded board.
+  const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [title, setTitle] = useState("");
@@ -229,36 +232,92 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
   });
   const taskDialogRef = useModalFocus(Boolean(selectedTask) && !moveRequest, () => setSelectedTask(null));
 
+  const [projection, setProjection] = useState(null);
+  const [syncedAt, setSyncedAt] = useState(null);
+  const boardRequestRef = useRef(0);
+  const boardColumns = useMemo(
+    () => (adapter?.canonical && Array.isArray(adapter.columns) ? adapter.columns : HERMES_COLUMNS),
+    [adapter],
+  );
+  const columnByStatus = useMemo(
+    () => new Map(boardColumns.map((column) => [column.status, column])),
+    [boardColumns],
+  );
+  const movePolicyFor = useCallback((status) => {
+    const column = columnByStatus.get(status);
+    return MOVE_POLICIES[status] ?? {
+      title: `${column?.label ?? status} 상태로 변경합니다.`,
+      description: column?.meaning ?? column?.manualNote ?? "허용된 owner 전환만 실행합니다.",
+      noteLabel: status === "blocked" ? "보류 사유" : "변경 메모",
+      event: `업무가 ${column?.label ?? status} 상태로 이동했습니다.`,
+    };
+  }, [columnByStatus]);
+  const canMoveTaskTo = useCallback((task, targetStatus) => {
+    const column = columnByStatus.get(targetStatus);
+    return canMoveBoardTask(task, targetStatus, { column, canonical: Boolean(adapter?.canonical) });
+  }, [adapter, columnByStatus]);
+  // Only the initial read replaces the grid. Background refreshes keep every
+  // existing card visible and merely expose aria-busy on the section.
+  const loading = !loaded;
+
   const loadBoard = useCallback(async () => {
+    const requestId = boardRequestRef.current + 1;
+    boardRequestRef.current = requestId;
+    setRefreshing(true);
     try {
-      setError("");
-      const [nextBoard, diagnostics, stats, workers] = adapter
-        ? await adapter.loadBoard()
+      const [nextBoard, diagnostics, stats, workers, nextProjection] = adapter
+        ? await adapter.loadBoard({ connectorHealth })
         : await Promise.all([
           hermesFetch("/api/plugins/kanban/board", { cacheTtlMs: 10000 }),
           hermesFetch("/api/plugins/kanban/diagnostics", { cacheTtlMs: 15000 }).catch((error) => ({ error: error.message })),
           hermesFetch("/api/plugins/kanban/stats", { cacheTtlMs: 15000 }).catch((error) => ({ error: error.message })),
           hermesFetch("/api/plugins/kanban/workers/active", { cacheTtlMs: 10000 }).catch((error) => ({ error: error.message })),
         ]);
-      const normalizedBoard = normalizeOfficeBoard(nextBoard);
-      setBoard(normalizedBoard);
+      if (requestId !== boardRequestRef.current) return;
+      setBoard(normalizeOfficeBoard(nextBoard));
       setNativeOps({ diagnostics, stats, workers });
-      saveCachedBoard(normalizedBoard);
+      setProjection(nextProjection ?? null);
+      setSyncedAt(Date.now());
+      setError("");
     } catch (loadError) {
-      setError(loadError.message);
+      // The error is reported beside the cards, not instead of them: a failed
+      // refresh does not mean the work the user is looking at stopped existing.
+      if (requestId === boardRequestRef.current) setError(loadError.message);
     } finally {
-      setLoading(false);
+      if (requestId === boardRequestRef.current) {
+        setLoaded(true);
+        setRefreshing(false);
+      }
     }
-  }, [adapter]);
+  }, [adapter, connectorHealth]);
+
+  // `loadBoard` changes identity whenever the adapter or the connector health
+  // does, and both change often. Holding it in a ref keeps the mount read and
+  // the poll on a single, stable effect — the previous version re-ran its whole
+  // effect on each identity change, and the cleanup cancelled the queued first
+  // read every time, so the board could sit unloaded indefinitely.
+  const loadBoardRef = useRef(loadBoard);
+  useEffect(() => { loadBoardRef.current = loadBoard; }, [loadBoard]);
 
   useEffect(() => {
-    const initial = window.setTimeout(loadBoard, 0);
-    const timer = window.setInterval(loadBoard, 15000);
+    let active = true;
+    const run = () => { if (active) void loadBoardRef.current(); };
+    run();
+    const timer = window.setInterval(run, 15000);
     return () => {
-      window.clearTimeout(initial);
+      active = false;
       window.clearInterval(timer);
     };
-  }, [loadBoard]);
+  }, []);
+
+  // A realtime work, result, evidence or connector event arrived. Re-read now
+  // rather than waiting up to fifteen seconds for the poll.
+  const lastRevisionRef = useRef(revision);
+  useEffect(() => {
+    if (revision === lastRevisionRef.current) return;
+    lastRevisionRef.current = revision;
+    void loadBoardRef.current();
+  }, [revision]);
 
   const allTasks = useMemo(
     () => (board.columns ?? []).flatMap((column) => (column.tasks ?? []).map((task) => ({ ...task, column: column.name }))),
@@ -296,6 +355,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
   const selectedEvents = useMemo(() => taskEvents(selectedTask), [selectedTask]);
   const selectedChecklist = useMemo(() => taskChecklist(selectedTask ?? {}), [selectedTask]);
   const [healthTone, healthText] = useMemo(() => taskHealth(selectedTask ?? {}), [selectedTask]);
+  const activeMovePolicy = moveRequest ? movePolicyFor(moveRequest.targetStatus) : null;
 
   const addEventToMetadata = (task, metadata, eventText, type = "action") => ({
     ...metadata,
@@ -365,8 +425,11 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
     if (!task || isDeletedTask(task)) return;
     const currentStatus = taskStatus(task);
     if (currentStatus === targetStatus) return;
-    if (currentStatus === "review" || targetStatus === "review") {
-      setNotice("검토 상태는 Hermes worker의 완료·검토 흐름에서만 전환됩니다.");
+    if (!canMoveTaskTo(task, targetStatus)) {
+      const column = columnByStatus.get(targetStatus);
+      setNotice(task.terminal
+        ? "종료된 실제 업무는 다시 이동할 수 없습니다."
+        : column?.manualNote ?? "이 상태는 실제 실행 기록으로만 바뀝니다.");
       return;
     }
     setError("");
@@ -383,7 +446,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
   const confirmMoveTask = async () => {
     if (!moveRequest?.task) return;
     const { task, targetStatus } = moveRequest;
-    const policy = MOVE_POLICIES[targetStatus];
+    const policy = movePolicyFor(targetStatus);
     if (targetStatus === "blocked" && !moveForm.note.trim()) {
       setError("멈춤 상태로 이동하려면 막힌 이유를 입력해주세요.");
       return;
@@ -418,7 +481,9 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
     }
 
     try {
-      const movePlan = officialKanbanMovePlan(targetStatus);
+      const movePlan = adapter?.canonical
+        ? { status: targetStatus, dispatch: false }
+        : officialKanbanMovePlan(targetStatus);
       const nextTask = await patchTask(task, {
         status: movePlan.status,
         assignee: moveForm.assignee,
@@ -459,6 +524,26 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
     setDeleteReason("");
     setNotice("");
   };
+
+  useEffect(() => {
+    if (!focusTaskId || !loaded) return undefined;
+    const { task } = findBoardTask(focusTaskId);
+    if (!task) return undefined;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const metadata = task.metadata ?? {};
+      setSelectedTask(task);
+      setCollaborator(metadata.collaborators?.[0] ?? "");
+      setReviewer(metadata.reviewers?.[0] ?? "");
+      setDueDate(metadata.due_date ?? "");
+      setChecklistInput("");
+      setDeleteReason("");
+      setNotice("");
+      onFocusHandled?.();
+    });
+    return () => { active = false; };
+  }, [findBoardTask, focusTaskId, loaded, onFocusHandled]);
 
   const saveTaskPlan = async () => {
     if (!selectedTask) return;
@@ -669,7 +754,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
   };
 
   return (
-    <section className="native-kanban">
+    <section className="native-kanban" aria-busy={loading || refreshing}>
       <header>
         <div>
           <span>HERMES NATIVE KANBAN</span>
@@ -697,6 +782,11 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
           <span>gateway dispatcher worker state</span>
         </article>
         <article>
+          <small>{adapter?.canonical ? "CLOUD SYNC" : "BOARD SYNC"}</small>
+          <strong>{refreshing ? "SYNCING" : projection?.state?.toUpperCase?.() ?? (loaded ? "READY" : "LOADING")}</strong>
+          <span>{syncedAt ? `최근 동기화 ${formatDate(syncedAt)}` : "아직 읽은 기록 없음"}</span>
+        </article>
+        <article>
           <small>OFFICIAL DISPATCH</small>
           <button type="button" onClick={runOfficialDispatch}>dispatcher 실행</button>
         </article>
@@ -712,9 +802,10 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
       {error && <p className="kanban-api-error">{error}</p>}
       {loading ? <p className="empty-state">Hermes 업무 보드를 불러오는 중입니다.</p> : (
         <div className="native-kanban-grid">
-          {COLUMNS.map(([status, label, english]) => {
+          {boardColumns.map((column) => {
+            const { status, label, english, manual, meaning, manualNote } = column;
             const tasks = taskColumn(status);
-            const isManualDropTarget = status !== "review";
+            const isManualDropTarget = Boolean(manual);
             return (
               <section
                 key={status}
@@ -730,7 +821,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
                   <div>
                     <small>{english}</small>
                     <strong>{status === "done" && showDoneArchive ? "완료 아카이브" : label}</strong>
-                    <em>{MOVE_POLICIES[status]?.description}</em>
+                    <em>{meaning ?? MOVE_POLICIES[status]?.description}</em>
                   </div>
                   <b>{tasks.length}</b>
                 </header>
@@ -740,7 +831,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
                     return (
                       <article
                         key={task.id}
-                        draggable={status !== "review"}
+                        draggable={!task.terminal && boardColumns.some((target) => canMoveTaskTo(task, target.status))}
                         onDragStart={() => setDragged(task.id)}
                         onDragEnd={() => setDragged("")}
                         onClick={() => openTask(task)}
@@ -767,19 +858,19 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
                           <select
                             aria-label={`${task.title} 상태 이동`}
                             value={taskStatus(task)}
-                            disabled={taskStatus(task) === "review"}
+                            disabled={task.terminal || !boardColumns.some((target) => canMoveTaskTo(task, target.status))}
                             onChange={(event) => openMoveDialog(task.id, event.target.value)}
                           >
-                            {COLUMNS.filter(([targetStatus]) => targetStatus !== "review").map(([targetStatus, targetLabel]) => (
-                              <option key={targetStatus} value={targetStatus}>{targetLabel}</option>
+                            <option value={taskStatus(task)}>{task.statusLabel ?? label} · 현재</option>
+                            {boardColumns.filter((target) => canMoveTaskTo(task, target.status)).map((target) => (
+                              <option key={target.status} value={target.status}>{target.label}</option>
                             ))}
-                            {taskStatus(task) === "review" && <option value="review">검토 · worker 전용</option>}
                           </select>
                         </label>
                       </article>
                     );
                   })}
-                  {!tasks.length && <p>{status === "review" ? "Hermes worker 검토 대기 없음" : "여기로 업무를 옮기세요"}</p>}
+                  {!tasks.length && <p>{manualNote ?? "이 상태의 실제 업무가 없습니다."}</p>}
                 </div>
               </section>
             );
@@ -793,19 +884,19 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
             <header>
               <div>
                 <span>STATUS MOVE POLICY</span>
-                <h3 id="kanban-move-title">{MOVE_POLICIES[moveRequest.targetStatus].title}</h3>
+                <h3 id="kanban-move-title">{activeMovePolicy.title}</h3>
                 <p>{moveRequest.task.title}</p>
               </div>
               <button type="button" onClick={closeMoveDialog}>닫기</button>
             </header>
             <div className="move-route" aria-label={moveRequest.targetStatus === "running" ? "실행 준비 전환 후 공식 dispatcher 실행" : undefined}>
-              <strong>{STATUS_LABEL[moveRequest.fromStatus] ?? moveRequest.fromStatus}</strong>
+              <strong>{columnByStatus.get(moveRequest.fromStatus)?.label ?? moveRequest.task.statusLabel ?? moveRequest.fromStatus}</strong>
               <span>→</span>
               {moveRequest.targetStatus === "running" ? (
                 <><strong>실행 준비</strong><span>→</span><strong>공식 dispatcher</strong></>
-              ) : <strong>{STATUS_LABEL[moveRequest.targetStatus] ?? moveRequest.targetStatus}</strong>}
+              ) : <strong>{columnByStatus.get(moveRequest.targetStatus)?.label ?? moveRequest.targetStatus}</strong>}
             </div>
-            <p className="move-policy-copy">{MOVE_POLICIES[moveRequest.targetStatus].description}</p>
+            <p className="move-policy-copy">{activeMovePolicy.description}</p>
 
             <div className="move-dialog-grid">
               <label>
@@ -846,7 +937,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
             </div>
 
             <label className="move-note-field">
-              {MOVE_POLICIES[moveRequest.targetStatus].noteLabel}
+              {activeMovePolicy.noteLabel}
               <textarea value={moveForm.note} onChange={(event) => setMoveForm((current) => ({ ...current, note: event.target.value }))} placeholder="이 상태로 이동하는 이유와 다음 액션을 남겨주세요." />
             </label>
 
@@ -879,7 +970,7 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
             </header>
 
             <div className="task-ops-status">
-              <article><small>상태</small><strong>{STATUS_LABEL[taskStatus(selectedTask)] ?? taskStatus(selectedTask)}</strong></article>
+              <article><small>상태</small><strong>{selectedTask.statusLabel ?? columnByStatus.get(taskStatus(selectedTask))?.label ?? taskStatus(selectedTask)}</strong></article>
               <article><small>담당자</small><strong>{selectedOwner.name}</strong></article>
               <article><small>우선순위</small><strong>P{selectedTask.priority ?? 0}</strong></article>
               <article><small>마감/기준일</small><strong>{dueDate ? formatDate(dueDate) : "미설정"}</strong></article>
@@ -890,22 +981,22 @@ export default function HermesKanban({ onOpenAgent, onStartMeeting, adapter = nu
               <strong>{healthText}</strong>
             </section>
 
-            {taskStatus(selectedTask) !== "review" && (
+            {!selectedTask.terminal && boardColumns.some((target) => canMoveTaskTo(selectedTask, target.status)) && (
               <section className="task-ops-section task-status-move" aria-label="업무 상태 이동">
                 <span>MOVE STATUS</span>
                 <p>드래그 없이도 이동할 상태를 선택할 수 있습니다. 이동 정책과 필수 입력은 다음 화면에서 확인합니다.</p>
                 <div className="task-status-move-grid">
-                  {COLUMNS.filter(([targetStatus]) => targetStatus !== "review" && targetStatus !== taskStatus(selectedTask)).map(([targetStatus, targetLabel]) => (
+                  {boardColumns.filter((target) => canMoveTaskTo(selectedTask, target.status)).map((target) => (
                     <button
                       type="button"
-                      key={targetStatus}
+                      key={target.status}
                       onClick={() => {
                         const taskId = selectedTask.id;
                         setSelectedTask(null);
-                        openMoveDialog(taskId, targetStatus);
+                        openMoveDialog(taskId, target.status);
                       }}
                     >
-                      {targetLabel}로 이동
+                      {target.label}로 이동
                     </button>
                   ))}
                 </div>

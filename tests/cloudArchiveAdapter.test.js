@@ -11,10 +11,14 @@ test("cloud archive maps durable conversations and meeting results into the spec
       last_message_at: "2026-08-24T12:00:00.000Z",
       messages: [{ id: "m-1" }, { id: "m-2" }],
     }],
+    // `complete` is the only value `bibi_meetings.status` accepts for a
+    // finished meeting; the old fixture used `completed`, which the check
+    // constraint has never allowed.
     meetings: [{
       id: "meeting-1",
       topic: "배포 판단",
-      status: "completed",
+      status: "complete",
+      completion_mode: "automatic",
       completed_at: "2026-08-24T13:00:00.000Z",
       participants: [{
         profile_id: "bibi-02",

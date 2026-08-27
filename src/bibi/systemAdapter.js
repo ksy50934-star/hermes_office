@@ -1,4 +1,8 @@
 export function createCloudSystemAdapter({ roster = [], runtime = { health: [] }, connector = null } = {}) {
+  // `describeConnectorHealth` reports `state`. Reading `.status` here always
+  // produced "unknown", so the system page claimed no connector even when the
+  // Mac was online.
+  const connectorState = connector?.health?.state ?? "unknown";
   const healthByProfile = new Map((runtime.health ?? []).map((row) => [row.profile_id, row]));
   const primary = healthByProfile.get("bibi-01") ?? runtime.health?.[0] ?? null;
   const profiles = roster.map((profile) => {
@@ -17,7 +21,7 @@ export function createCloudSystemAdapter({ roster = [], runtime = { health: [] }
   return {
     backend: "bibi-cloud",
     readOnly: true,
-    connection: connector?.health?.status ?? "unknown",
+    connection: connectorState,
     workspace: {
       profiles,
       model: {
@@ -30,7 +34,7 @@ export function createCloudSystemAdapter({ roster = [], runtime = { health: [] }
         messages: null,
       },
       services: {
-        connector: connector?.health?.status ?? "unknown",
+        connector: connectorState,
         projected_at: primary?.collected_at ?? null,
       },
     },

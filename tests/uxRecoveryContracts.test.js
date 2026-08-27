@@ -14,8 +14,9 @@ test("Kanban exposes touch and keyboard status movement without bypassing move p
   assert.match(source, /aria-label={`\$\{task\.title\} 상태 이동`}/);
   assert.match(source, /onChange=\{\(event\) => openMoveDialog\(task\.id, event\.target\.value\)\}/);
   assert.match(source, /aria-label="업무 상태 이동"/);
-  assert.match(source, /openMoveDialog\(taskId, targetStatus\)/);
-  assert.match(source, /targetStatus !== "review"/);
+  assert.match(source, /openMoveDialog\(taskId, target\.status\)/);
+  assert.match(source, /if \(!canMoveTaskTo\(task, targetStatus\)\)/);
+  assert.match(source, /!selectedTask\.terminal && boardColumns\.some/);
 });
 
 test("meeting room switches rosters above nine people to a non-overlapping grid", async () => {

@@ -5,6 +5,12 @@ import BibiCloudMeetingConsole from "./BibiCloudMeetingConsole.jsx";
 
 import { AUTH_GATE, isAuthLocked, isBibiCloudView, isBibiSurface } from "./bibi/surface.js";
 import { cloudOfficeState } from "./bibi/cloudLegacyAdapter.js";
+import {
+  boardMovePlan,
+  describeRnbWork,
+  projectionFromMissions,
+} from "./bibi/officeProjection.js";
+import { CONNECTOR_STATE } from "./bibi/connectionState.js";
 import { createBibiKanbanAdapter } from "./bibi/kanbanAdapter.js";
 import { createCloudArchiveAdapter } from "./bibi/archiveAdapter.js";
 import { createCloudDataRoomAdapter } from "./bibi/dataRoomAdapter.js";
@@ -13,10 +19,18 @@ import { createCloudPluginAdapter } from "./bibi/pluginAdapter.js";
 import { createCloudSystemAdapter } from "./bibi/systemAdapter.js";
 import { createCloudTeamAdapter } from "./bibi/teamAdapter.js";
 import {
+  completeMeeting as completeBibiMeeting,
+  completeMeetingWithReadback as completeBibiMeetingWithReadback,
+  loadMeetings as loadBibiMeetings,
   saveOrganizationState as saveCloudOrganization,
   startMeetingWithReadback as startBibiMeeting,
   transitionWork as transitionBibiWork,
 } from "./cloud/workspaceClient.js";
+import {
+  indexMeetingFollowups,
+  isMeetingAutoCompletable,
+  partitionCloudMeetings,
+} from "./bibi/meetingLifecycle.js";
 import CommandCenter from "./CommandCenter.jsx";
 import DataRoom from "./DataRoom.jsx";
 import HermesOffice from "./HermesOffice.jsx";
@@ -45,7 +59,7 @@ import {
   profileUpdateRequests,
 } from "./officialContracts.js";
 import { useModalFocus } from "./useModalFocus.js";
-import { buildCanonicalBibiOrganizationNodes, buildDefaultOrganizationNodes, organizationRoomAssignments, validateOrganizationNodes } from "../organizationHierarchy.js";
+import { ORGANIZATION_VERSION, buildCanonicalBibiOrganizationNodes, buildDefaultOrganizationNodes, organizationRequiresMigration, organizationRoomAssignments, validateOrganizationNodes } from "../organizationHierarchy.js";
 import { OFFICE_BRAND_MARK, OFFICE_BRAND_MARK_SRC, OFFICE_WORKSPACE_LABEL } from "./branding.js";
 import {
   hydrateActiveMeetings,
@@ -89,7 +103,7 @@ const NAV_GROUPS = [
     label: "SYSTEM",
     items: [
       ["system", "운영 관리", "SY"],
-      ["terminal", "Hermes 콘솔", "HC"],
+      ["terminal", "실행 관제", "관제"],
     ],
   },
 ];
@@ -182,6 +196,9 @@ function reservationLiveViewerUrl(status, platform) {
   const query = new URLSearchParams({ profile: "hermes-operations", sessionId });
   return `/agent-live?${query}`;
 }
+
+/** Shown when a read-only cloud adapter locks the runtime settings sections. */
+const CLOUD_READONLY_SECTION_NOTICE = "Cloud 운영 화면은 outbound connector가 투영한 상태를 표시합니다. 런타임 설정 변경은 durable command channel 연결 후 활성화됩니다.";
 
 const SYSTEM_SECTION_COPY = {
   overview: ["SYSTEM HEALTH", "운영 현황", "Hermes 연결, Gateway, 모델과 누적 사용 상태를 한 화면에서 확인합니다."],
@@ -421,15 +438,22 @@ function SystemPage({ workspace, connection, notificationSettings, onNotificatio
   const [availableModels, setAvailableModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelSelectMode, setModelSelectMode] = useState("select");
-  const [settingsNotice, setSettingsNotice] = useState(googleOAuthNoticeFromUrl);
+  const [rawSettingsNotice, setSettingsNotice] = useState(googleOAuthNoticeFromUrl);
   const [settingsBusy, setSettingsBusy] = useState(false);
-  const [activeSection, setActiveSection] = useState(initialSystemSectionFromUrl);
+  const [requestedSection, setActiveSection] = useState(initialSystemSectionFromUrl);
+  // A read-only cloud adapter has no runtime settings to change, so those
+  // sections do not exist for it. Deriving that during render — rather than
+  // rendering the restricted section and correcting it from an effect — means
+  // the section the user cannot use is never shown, not even for one frame.
+  const sectionLocked = Boolean(adapter?.readOnly)
+    && requestedSection !== "overview"
+    && requestedSection !== "notifications";
+  const activeSection = sectionLocked ? "overview" : requestedSection;
+  const settingsNotice = sectionLocked ? CLOUD_READONLY_SECTION_NOTICE : rawSettingsNotice;
   useEffect(() => {
-    if (!adapter?.readOnly || activeSection === "overview" || activeSection === "notifications") return;
-    setActiveSection("overview");
+    if (!sectionLocked) return;
     syncSystemSectionUrl("overview");
-    setSettingsNotice("Cloud 운영 화면은 outbound connector가 투영한 상태를 표시합니다. 런타임 설정 변경은 durable command channel 연결 후 활성화됩니다.");
-  }, [activeSection, adapter]);
+  }, [sectionLocked]);
   const [reservationIntegrations, setReservationIntegrations] = useState(null);
   const [reservationIntegrationsLoading, setReservationIntegrationsLoading] = useState(false);
   const [reservationIntegrationsError, setReservationIntegrationsError] = useState("");
@@ -1436,11 +1460,12 @@ function OfficeApp() {
   const [bibiAuthGate, setBibiAuthGate] = useState(AUTH_GATE.LOCKED);
   const [bibiCloudSnapshot, setBibiCloudSnapshot] = useState(null);
   const [workspace, setWorkspace] = useState(() => loadCachedWorkspace());
-  const [organization, setOrganization] = useState({ version: 1, revision: 0, nodes: [], audit: [] });
+  const [organization, setOrganization] = useState({ version: ORGANIZATION_VERSION, revision: 0, nodes: [], audit: [] });
   const [organizationStatus, setOrganizationStatus] = useState("loading");
   const [organizationError, setOrganizationError] = useState("");
   const organizationSeedStartedRef = useRef(false);
   const cloudOrganizationSeedStartedRef = useRef(false);
+  const cloudOrganizationMigrationStartedRef = useRef(false);
   const [error, setError] = useState("");
   const [meetingStartError, setMeetingStartError] = useState("");
   const [selectedRoom, setSelectedRoom] = useState("");
@@ -1454,13 +1479,25 @@ function OfficeApp() {
   const [activeMeetings, setActiveMeetings] = useState(loadActiveMeetings);
   const [selectedMeetingId, setSelectedMeetingId] = useState(() => loadActiveMeetings()[0]?.id ?? "");
   const [meetingCloseRequests, setMeetingCloseRequests] = useState({});
+  const [meetingCloseError, setMeetingCloseError] = useState("");
   const [meetingClock, setMeetingClock] = useState(Date.now);
+  // Meetings this surface has already asked the database to complete
+  // automatically. The RPC is idempotent, so a repeat is harmless; this keeps a
+  // realtime storm from turning into one call per event.
+  const autoCompletedMeetingsRef = useRef(new Set());
 
   const [agentActivities, setAgentActivities] = useState({});
   const [connection, setConnection] = useState("connecting");
   const [mobileNav, setMobileNav] = useState(false);
   const mobileNavRef = useModalFocus(mobileNav, () => setMobileNav(false));
-  const [missions, setMissions] = useState([]);
+  // `null` until the legacy board has been read once. Distinct from `[]`, which
+  // means "read, and there is no work" — the two must not render the same.
+  // Which work item the board should scroll to and highlight, set by whatever
+  // surface linked to it.
+  const [focusedWorkItemId, setFocusedWorkItemId] = useState("");
+  const [missions, setMissions] = useState(null);
+  const [missionsError, setMissionsError] = useState("");
+  const [missionsSyncedAt, setMissionsSyncedAt] = useState(null);
   const [approvals, setApprovals] = useState([]);
   const [notificationSettings, setNotificationSettings] = useState(() => ({
     ...DEFAULT_NOTIFICATION_SETTINGS,
@@ -1477,7 +1514,14 @@ function OfficeApp() {
     : organizationStatus;
   const effectiveOrganizationError = bibiCloudView ? "" : organizationError;
   const bibiOffice = useMemo(() => cloudOfficeState(bibiCloudSnapshot ?? {}), [bibiCloudSnapshot]);
-  const cloudRuntimeMeetings = useMemo(() => (bibiCloudSnapshot?.meetings ?? []).map((meeting) => ({
+  // The open meetings, and only those. A completed meeting is a record: it
+  // belongs to the archive, which reads the same snapshot, and leaving it on
+  // this list is what used to make every meeting ever started look live.
+  const cloudMeetingSplit = useMemo(
+    () => partitionCloudMeetings(bibiCloudSnapshot?.meetings ?? []),
+    [bibiCloudSnapshot?.meetings],
+  );
+  const cloudRuntimeMeetings = useMemo(() => cloudMeetingSplit.active.map((meeting) => ({
     id: meeting.id,
     topic: meeting.topic,
     status: meeting.status === "complete" ? "complete" : "discussion",
@@ -1485,19 +1529,29 @@ function OfficeApp() {
     participantRows: meeting.participants,
     startedAt: Date.parse(meeting.created_at || 0),
     completedAt: meeting.completed_at ? Date.parse(meeting.completed_at) : undefined,
-  })), [bibiCloudSnapshot?.meetings]);
+  })), [cloudMeetingSplit]);
   const effectiveMeetings = bibiCloudView ? cloudRuntimeMeetings : activeMeetings;
   const effectiveActiveMeeting = effectiveMeetings.find((meeting) => meeting.id === selectedMeetingId) ?? null;
+  // Keyed on the owner alone, because that is the only thing the adapter closes
+  // over. Keying it on the whole snapshot rebuilt the adapter on every realtime
+  // event, which rebuilt the board's `loadBoard` callback, which re-ran the
+  // board's mount effect — and its cleanup cancelled the pending first load
+  // before it could fire. That is what left the board under its own empty
+  // container until a reload settled the churn.
   const bibiKanbanAdapter = useMemo(
     () => bibiCloudSnapshot?.ownerId ? createBibiKanbanAdapter({ ownerId: bibiCloudSnapshot.ownerId }) : null,
-    [bibiCloudSnapshot],
+    [bibiCloudSnapshot?.ownerId],
   );
+  // The completed-meeting archive is derived from the same durable snapshot the
+  // live surface reads, never from a browser-local meeting cache.
   const bibiArchiveAdapter = useMemo(
     () => bibiCloudSnapshot?.ownerId ? createCloudArchiveAdapter({
       archive: bibiCloudSnapshot.archive ?? [],
       meetings: bibiCloudSnapshot.meetings ?? [],
+      ownerId: bibiCloudSnapshot.ownerId,
+      followups: indexMeetingFollowups(bibiCloudSnapshot.workItems ?? []),
     }) : null,
-    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.archive, bibiCloudSnapshot?.meetings],
+    [bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.archive, bibiCloudSnapshot?.meetings, bibiCloudSnapshot?.workItems],
   );
   const bibiDataRoomAdapter = useMemo(
     () => bibiCloudSnapshot?.ownerId ? createCloudDataRoomAdapter({
@@ -1564,8 +1618,12 @@ function OfficeApp() {
       try {
         const board = await hermesFetch("/api/plugins/kanban/board", { cacheTtlMs: 10000 });
         setMissions(officeMissionsFromBoard(board));
+        setMissionsError("");
+        setMissionsSyncedAt(new Date().toISOString());
       } catch (boardError) {
-        setMissions([]);
+        // Left at whatever was last read. Replacing it with `[]` on a transient
+        // fetch failure would tell the user their work had disappeared.
+        setMissionsError(`Hermes 업무 보드를 불러오지 못했습니다. (${boardError.message})`);
         reportError(`Hermes 업무 보드를 불러오지 못했습니다. (${boardError.message})`);
       }
     } catch (loadError) {
@@ -1651,8 +1709,36 @@ function OfficeApp() {
   }, [activeMeetings]);
 
   const activeWorkspace = bibiCloudView ? bibiOffice.workspace : workspace;
-  const effectiveMissions = bibiCloudView ? bibiOffice.missions : missions;
+  const effectiveMissions = bibiCloudView ? bibiOffice.missions : (missions ?? []);
   const effectiveActivities = bibiCloudView ? bibiOffice.activities : agentActivities;
+
+  /**
+   * The one work projection every Office surface reads.
+   *
+   * Cloud work is projected from `kind = "work"` rows only; the legacy Hermes
+   * board is wrapped into the same shape. Both paths then go through
+   * `describeRnbWork`, so the right-hand panel can never be looking at a
+   * differently-filtered list from the Office it sits beside.
+   */
+  const legacyConnectorHealth = useMemo(
+    () => (connection === "online"
+      ? { state: CONNECTOR_STATE.ONLINE, label: "ONLINE · Hermes 연결됨", canDispatchLive: true, ageMs: 0, lastHeartbeatAt: missionsSyncedAt }
+      : { state: CONNECTOR_STATE.OFFLINE, label: "OFFLINE · Hermes 연결 없음", canDispatchLive: false, ageMs: null, lastHeartbeatAt: null }),
+    [connection, missionsSyncedAt],
+  );
+  const workProjection = useMemo(
+    () => (bibiCloudView
+      ? bibiOffice.projection
+      : projectionFromMissions(missions, {
+        loaded: Array.isArray(missions),
+        error: missionsError,
+        connectorHealth: legacyConnectorHealth,
+        lastSyncAt: missionsSyncedAt,
+      })),
+    [bibiCloudView, bibiOffice.projection, missions, missionsError, legacyConnectorHealth, missionsSyncedAt],
+  );
+  const rnbWork = useMemo(() => describeRnbWork(workProjection), [workProjection]);
+
   const profiles = useMemo(
     () => (activeWorkspace?.profiles ?? [])
       .filter((profile) => profile?.name)
@@ -1670,7 +1756,7 @@ function OfficeApp() {
     loadOrganization()
       .then(async (state) => {
         const normalizedNodes = validateOrganizationNodes(state?.nodes ?? []);
-        const requiresMigration = JSON.stringify(normalizedNodes) !== JSON.stringify(state?.nodes ?? []);
+        const requiresMigration = organizationRequiresMigration(state?.nodes ?? []);
         let normalizedState = { ...state, nodes: normalizedNodes };
         if (requiresMigration) {
           try {
@@ -1730,6 +1816,34 @@ function OfficeApp() {
         setOrganizationError(saveError.message);
       });
   }, [bibiCloudView, bibiCloudSnapshot?.ownerId, cloudOrganization.audit, cloudOrganization.nodes.length, cloudOrganization.revision, profiles]);
+
+  // A cloud chart stored under the v1 departments is repaired in place, not
+  // merely relabelled on screen: otherwise the next writer would save v1 back
+  // over the migration. The revision CAS still guards it, so a concurrent edit
+  // wins and the refreshed chart is re-checked instead of being overwritten.
+  useEffect(() => {
+    const ownerId = bibiCloudSnapshot?.ownerId;
+    if (!bibiCloudView || !ownerId || !cloudOrganization.nodes.length || cloudOrganizationMigrationStartedRef.current) return;
+    if (!organizationRequiresMigration(cloudOrganization.nodes)) return;
+    cloudOrganizationMigrationStartedRef.current = true;
+    Promise.resolve()
+      .then(() => validateOrganizationNodes(cloudOrganization.nodes))
+      .then((migrated) => saveCloudOrganization({
+        ownerId,
+        nodes: migrated,
+        expectedRevision: cloudOrganization.revision,
+        audit: cloudOrganization.audit,
+      }))
+      .then((state) => setBibiCloudSnapshot((current) => current ? { ...current, organization: state } : current))
+      .catch((saveError) => {
+        cloudOrganizationMigrationStartedRef.current = false;
+        if (saveError.status === 409 && saveError.current) {
+          setBibiCloudSnapshot((current) => current ? { ...current, organization: saveError.current } : current);
+          return;
+        }
+        setOrganizationError(saveError.message);
+      });
+  }, [bibiCloudView, bibiCloudSnapshot?.ownerId, cloudOrganization.audit, cloudOrganization.nodes, cloudOrganization.revision]);
 
   const saveOrganizationStructure = useCallback(async (nodes) => {
     setOrganizationStatus("saving");
@@ -1852,6 +1966,30 @@ function OfficeApp() {
     }
   }, []);
 
+  /**
+   * Open the exact thing a right-hand-panel row names.
+   *
+   * The panel used to open a modal filtered by a made-up category label, so a
+   * row and its destination could not be checked against each other. Each row
+   * now carries the navigation its own projection produced.
+   */
+  const openWorkItem = useCallback((navigation) => {
+    if (!navigation) return;
+    if (navigation.target === "meeting" && navigation.meetingId) {
+      setSelectedMeetingId(navigation.meetingId);
+      navigate("meeting");
+      return;
+    }
+    if (navigation.target === "conversation" && navigation.conversationId) {
+      setChatProfile(navigation.profileId ?? "bibi-01");
+      setChatSessionId(navigation.conversationId);
+      navigate("chat");
+      return;
+    }
+    setFocusedWorkItemId(navigation.workItemId ?? navigation.taskId ?? "");
+    navigate(navigation.view ?? "kanban");
+  }, [navigate]);
+
   const openRoom = (roomId, context = null) => {
     setView("office");
     setSelectedRoom(roomId);
@@ -1962,10 +2100,50 @@ function OfficeApp() {
     }
   }, [navigate, notificationSettings.autoOpenChat, saveLocalReport, showLocalNotification, updateAgentActivity]);
 
+  const applyCloudMeetings = useCallback((meetings) => {
+    setBibiCloudSnapshot((current) => ({
+      ...current,
+      meetings,
+      revision: Number(current?.revision ?? 0) + 1,
+    }));
+  }, []);
+
+  /**
+   * End a cloud meeting for real.
+   *
+   * The local console archives by forgetting a browser-local record. A cloud
+   * meeting cannot: the row outlives the tab, so it has to be written and then
+   * read back before this surface is allowed to claim the meeting is over.
+   *
+   * `automatic` is the same call under the rule the database enforces — every
+   * participant work item terminal, at least one participant — and it declines
+   * quietly when the meeting does not qualify, because the caller is a realtime
+   * reaction rather than a person pressing a button.
+   */
+  const completeCloudMeeting = useCallback(async (meeting, mode = "manual") => {
+    if (mode === "automatic") {
+      const completion = await completeBibiMeeting({ meetingId: meeting.id, mode });
+      if (completion.status !== "complete") return false;
+      applyCloudMeetings(await loadBibiMeetings());
+    } else {
+      const { meetings } = await completeBibiMeetingWithReadback({ meetingId: meeting.id, mode });
+      applyCloudMeetings(meetings);
+    }
+    setSelectedMeetingId((current) => (current === meeting.id ? "" : current));
+    return true;
+  }, [applyCloudMeetings]);
+
   const requestMeetingClose = useCallback((meeting) => {
     if (meeting.status !== "complete" && !window.confirm("진행 중인 회의를 종료하고 현재 기록을 아카이브로 이동할까요?")) return;
+    if (bibiCloudView) {
+      setMeetingCloseError("");
+      completeCloudMeeting(meeting).catch((closeError) => {
+        setMeetingCloseError(closeError.message || "회의를 종료하지 못했습니다.");
+      });
+      return;
+    }
     setMeetingCloseRequests((current) => ({ ...current, [meeting.id]: Date.now() }));
-  }, []);
+  }, [bibiCloudView, completeCloudMeeting]);
 
   const handleMeetingClosed = useCallback(({ meetingId }) => {
     setActiveMeetings((current) => current.filter((meeting) => meeting.id !== meetingId));
@@ -1987,16 +2165,45 @@ function OfficeApp() {
     }));
   }, []);
 
+  // A meeting whose participants have all reached a terminal state is finished,
+  // and the record should say so without waiting for someone to close the tab.
+  // The condition is re-derived in the database before anything is written, so
+  // the worst a wrong answer here can do is spend a round trip.
+  useEffect(() => {
+    if (!bibiCloudView || !bibiCloudSnapshot?.ownerId) return undefined;
+    const pending = (bibiCloudSnapshot.meetings ?? [])
+      .filter(isMeetingAutoCompletable)
+      .filter((meeting) => !autoCompletedMeetingsRef.current.has(meeting.id));
+    if (!pending.length) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      for (const meeting of pending) {
+        autoCompletedMeetingsRef.current.add(meeting.id);
+        try {
+          const completed = await completeCloudMeeting(meeting, "automatic");
+          // The database declined, so the local reading was ahead of the work.
+          // Forget it, and let the next snapshot ask again.
+          if (!completed) autoCompletedMeetingsRef.current.delete(meeting.id);
+        } catch {
+          autoCompletedMeetingsRef.current.delete(meeting.id);
+        }
+        if (cancelled) return;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [bibiCloudView, bibiCloudSnapshot?.ownerId, bibiCloudSnapshot?.meetings, completeCloudMeeting]);
+
   const startMeeting = useCallback(async (meeting) => {
     if (bibiCloudView) {
       setMeetingStartError("");
       try {
-        const { meetingId, meetings } = await startBibiMeeting({ topic: meeting.topic, profileIds: meeting.participants });
-        setBibiCloudSnapshot((current) => ({
-          ...current,
-          meetings,
-          revision: Number(current?.revision ?? 0) + 1,
-        }));
+        const { meetingId, meetings } = await startBibiMeeting({
+          topic: meeting.topic,
+          profileIds: meeting.participants,
+          clientRequestId: meeting.id ?? crypto.randomUUID(),
+        });
+        applyCloudMeetings(meetings);
         setSelectedMeetingId(meetingId);
         setMeetingStartError("");
         navigate("meeting");
@@ -2028,7 +2235,7 @@ function OfficeApp() {
       return next;
     });
     navigate("meeting");
-  }, [bibiCloudView, navigate]);
+  }, [applyCloudMeetings, bibiCloudView, navigate]);
 
   const toggleMissionStep = async (missionId, stepId) => {
     const mission = effectiveMissions.find((item) => item.id === missionId);
@@ -2055,21 +2262,25 @@ function OfficeApp() {
     const mission = effectiveMissions.find((item) => item.id === missionId);
     if (!mission) return;
     if (bibiCloudView) {
-      try {
-        if (status === "done" || status === "approval") {
-          setError("완료·검토 상태는 실제 Hermes 실행 결과로만 전환됩니다.");
-          return;
-        }
-        if (mission.cloudStatus === "blocked") await transitionBibiWork({ workItemId: missionId, type: "unblock" });
-        await transitionBibiWork({ workItemId: missionId, type: "assign", profileId: mission.owner });
-        setError("Bibi Cloud 업무를 담당 profile에 재배정했습니다. connector가 실제 실행을 가져갑니다.");
-      } catch (taskError) {
-        setError(taskError.message);
-      }
+      // One planner decides what an owner may do, and it refuses terminal work
+      // and connector-owned columns before any request is sent.
+      const plan = boardMovePlan(mission, status, {
+        profileId: mission.owner,
+        reason: status === "blocked" ? "업무 보드에서 보류" : "",
+      });
+      await transitionBibiWork({
+        workItemId: missionId,
+        type: plan.type,
+        profileId: plan.profileId ?? null,
+        reason: plan.reason ?? null,
+      });
+      // No local refresh: the write lands in `work_items`, and the workspace's
+      // realtime subscription re-reads the owner-scoped snapshot from it.
+      setError(`“${mission.title ?? "업무"}”을(를) ${plan.type} 처리했습니다.`);
       return;
     }
     try {
-      const targetStatus = { queued: "todo", working: "running", approval: "review", done: "done" }[status] ?? status;
+      const targetStatus = status;
       const plan = officialKanbanMovePlan(targetStatus);
       await patchOfficeTaskFromLatest(hermesFetch, missionId, { status: plan.status }, (latestTask) => ({
         ...(latestTask.metadata ?? {}),
@@ -2093,7 +2304,7 @@ function OfficeApp() {
     if (bibiCloudView) {
       try {
         await transitionBibiWork({ workItemId: mission.id, type: "cancel", reason: String(reason).trim() });
-        setError(`“${mission.title}” 실제 업무를 취소했습니다.`);
+        setError(`“${mission.title ?? "제목 없는 업무"}” 실제 업무를 취소했습니다.`);
       } catch (taskError) {
         setError(taskError.message);
         throw taskError;
@@ -2109,7 +2320,7 @@ function OfficeApp() {
         status_note: `지휘 센터에서 삭제: ${String(reason).trim()}`,
       }));
       await refresh();
-      setError(`“${mission.title}” Task를 삭제하고 기록 보관함으로 이동했습니다.`);
+      setError(`“${mission.title ?? "제목 없는 업무"}” Task를 삭제하고 기록 보관함으로 이동했습니다.`);
     } catch (taskError) {
       setError(taskError.message);
       throw taskError;
@@ -2180,7 +2391,7 @@ function OfficeApp() {
     team: "AI 팀",
     plugins: "Plugin",
     system: "시스템",
-    terminal: "Hermes 운영 콘솔",
+    terminal: "실행 관제",
   }[view];
   const activeChatProfiles = profiles.filter((profile) => ["working", "meeting", "approval"].includes(effectiveActivities[profile.name]?.state));
   const activeChatCount = activeChatProfiles.length;
@@ -2349,6 +2560,8 @@ function OfficeApp() {
             approvals={approvals}
             focusedRoom={selectedRoom}
             focusedRoomContext={selectedRoomContext}
+            rnb={rnbWork}
+            onOpenWorkItem={openWorkItem}
             onOpenCommand={() => navigate("command")}
             onStartChat={startChat}
             onMoveMission={moveMission}
@@ -2379,23 +2592,27 @@ function OfficeApp() {
                   <i className={meeting.status === "complete" ? "complete" : "running"} />
                   <span><b>{cleanMeetingTopic(meeting.topic)}</b><small>{bibiCloudView ? `${meeting.participants.length}명 · ${meeting.status === "complete" ? "완료" : "진행 중"}` : meetingArchiveCountdown(meeting, meetingClock)}</small></span>
                 </button>
-                {!bibiCloudView && <button
+                <button
                   type="button"
                   className="meeting-runtime-tab-close"
                   aria-label={`${cleanMeetingTopic(meeting.topic)} 회의 종료`}
                   title={meeting.status === "complete" ? "지금 아카이브로 이동" : "회의 종료"}
                   onClick={() => requestMeetingClose(meeting)}
-                >×</button>}
+                >×</button>
               </div>
             ))}
             <button type="button" className={`meeting-runtime-new ${!selectedMeetingId ? "active" : ""}`} onClick={() => setSelectedMeetingId("")}>+ 새 회의</button>
           </nav>
         )}
 
+        {specialistSurfaceReady && view === "meeting" && meetingCloseError && (
+          <p className="meeting-close-error" role="alert">{meetingCloseError}</p>
+        )}
+
         {specialistSurfaceReady && effectiveMeetings.map((meeting) => (
           <div key={meeting.id} className="meeting-console-host" hidden={view !== "meeting" || selectedMeetingId !== meeting.id}>
             {bibiCloudView ? (
-              <BibiCloudMeetingConsole meeting={meeting} onExit={() => navigate("office")} />
+              <BibiCloudMeetingConsole meeting={meeting} onExit={() => navigate("office")} onComplete={completeCloudMeeting} />
             ) : (
               <MeetingConsole
                 meeting={meeting}
@@ -2422,7 +2639,18 @@ function OfficeApp() {
         )}
 
         {specialistSurfaceReady && view === "kanban" && (
-          <HermesKanban onOpenAgent={startChat} onStartMeeting={startMeeting} adapter={bibiCloudView ? bibiKanbanAdapter : null} />
+          <HermesKanban
+            onOpenAgent={startChat}
+            onStartMeeting={startMeeting}
+            adapter={bibiCloudView ? bibiKanbanAdapter : null}
+            // Bumped by every realtime work, result, evidence and connector
+            // event, so the board re-reads without waiting for its poll and
+            // without the user reloading.
+            revision={bibiCloudView ? bibiCloudSnapshot?.revision ?? 0 : 0}
+            connectorHealth={bibiCloudView ? bibiCloudSnapshot?.connector?.health ?? null : legacyConnectorHealth}
+            focusTaskId={focusedWorkItemId}
+            onFocusHandled={() => setFocusedWorkItemId("")}
+          />
         )}
 
         {specialistSurfaceReady && view === "data" && (
@@ -2476,7 +2704,7 @@ function OfficeApp() {
             <PageIntro
               eyebrow="CONVERSATION ARCHIVE"
               title="업무와 대화를 이어가세요"
-              description="최근 대화를 선택하면 Hermes 콘솔에서 바로 이어집니다."
+              description="최근 대화를 선택하면 실행 관제에서 바로 이어집니다."
             />
             <SessionArchive
               profiles={profiles}
