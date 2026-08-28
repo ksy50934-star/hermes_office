@@ -234,6 +234,7 @@ export default function HermesKanban({
 
   const [projection, setProjection] = useState(null);
   const [syncedAt, setSyncedAt] = useState(null);
+  const titleInputRef = useRef(null);
   const boardRequestRef = useRef(0);
   const boardColumns = useMemo(
     () => (adapter?.canonical && Array.isArray(adapter.columns) ? adapter.columns : HERMES_COLUMNS),
@@ -332,6 +333,17 @@ export default function HermesKanban({
   const archivedDoneTasks = useMemo(
     () => visibleTasks.filter((task) => taskStatus(task) === "done" && isArchivedDone(task)),
     [visibleTasks],
+  );
+
+  const boardLoadFailed = Boolean(loaded && error && visibleTasks.length === 0);
+  const canonicalBoardEmpty = Boolean(adapter?.canonical && loaded && !error && visibleTasks.length === 0);
+  const canonicalBoardArchiveOnly = Boolean(
+    adapter?.canonical
+      && loaded
+      && !error
+      && !showDoneArchive
+      && archivedDoneTasks.length > 0
+      && visibleTasks.length === archivedDoneTasks.length,
   );
 
   const taskColumn = useCallback((status) => {
@@ -762,7 +774,7 @@ export default function HermesKanban({
           <p>드래그하면 상태별 정책 팝업이 열리고, 모든 변경은 task 타임라인에 기록됩니다.</p>
         </div>
         <div className="kanban-create">
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="새 업무 제목" />
+          <input ref={titleInputRef} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="새 업무 제목" />
           <select value={assignee} onChange={(event) => setAssignee(event.target.value)}>
             {Object.entries(TEAM_META).map(([name, meta]) => <option key={name} value={name}>{meta.name}</option>)}
           </select>
@@ -792,16 +804,51 @@ export default function HermesKanban({
         </article>
       </div>
 
-      <div className="kanban-policy-bar">
-        <span>완료 task는 최근 {DONE_ARCHIVE_DAYS}일만 표시됩니다.</span>
-        <button type="button" onClick={() => setShowDoneArchive((current) => !current)}>
-          {showDoneArchive ? "최근 완료 보기" : `완료 아카이브 보기 (${archivedDoneTasks.length})`}
-        </button>
-      </div>
+      {!canonicalBoardEmpty && !boardLoadFailed && !error && (
+        <div className="kanban-policy-bar">
+          <span>완료 task는 최근 {DONE_ARCHIVE_DAYS}일만 표시됩니다.</span>
+          <button type="button" onClick={() => setShowDoneArchive((current) => !current)}>
+            {showDoneArchive ? "최근 완료 보기" : `완료 아카이브 보기 (${archivedDoneTasks.length})`}
+          </button>
+        </div>
+      )}
 
-      {error && <p className="kanban-api-error">{error}</p>}
+      {error && visibleTasks.length > 0 && <p className="kanban-api-error" role="alert">{error}</p>}
       {loading ? <p className="empty-state">Hermes 업무 보드를 불러오는 중입니다.</p> : (
-        <div className="native-kanban-grid">
+        boardLoadFailed ? (
+          <section className="kanban-empty-workspace compact-state error-state" role="alert">
+            <div className="kanban-empty-copy">
+              <span>BOARD CONNECTION ERROR</span>
+              <h3>업무 보드를 불러오지 못했습니다</h3>
+              <p>{error}</p>
+              <button type="button" onClick={() => void loadBoard()}>다시 불러오기</button>
+            </div>
+          </section>
+        ) : canonicalBoardEmpty ? (
+          <section className="kanban-empty-workspace" role="status" aria-live="polite">
+            <div className="kanban-empty-copy">
+              <span>BOARD READY · 0 TASKS</span>
+              <h3>아직 등록된 업무가 없습니다</h3>
+              <p>이 보드는 직접 맡긴 업무만 보여줍니다. 대화와 회의 실행 기록은 각각의 화면에 보존되며, 첫 업무를 등록하면 상태별 흐름이 여기에서 시작됩니다.</p>
+              <button type="button" onClick={() => titleInputRef.current?.focus()}>첫 업무 등록하기</button>
+            </div>
+            <ol className="kanban-empty-flow" aria-label="업무 진행 단계">
+              <li><b>01</b><strong>업무 등록</strong><span>제목과 담당자를 정합니다.</span></li>
+              <li><b>02</b><strong>담당 배정</strong><span>로컬 Mac 실행 대기열로 이동합니다.</span></li>
+              <li><b>03</b><strong>실제 실행</strong><span>준비·실행·보류 상태를 기록합니다.</span></li>
+              <li><b>04</b><strong>결과 확인</strong><span>완료·실패·취소 이력을 보존합니다.</span></li>
+            </ol>
+          </section>
+        ) : canonicalBoardArchiveOnly ? (
+          <section className="kanban-empty-workspace compact-state archive-state" role="status" aria-live="polite">
+            <div className="kanban-empty-copy">
+              <span>RECENT BOARD · 0 TASKS</span>
+              <h3>최근 보드에 표시할 업무가 없습니다</h3>
+              <p>완료 후 {DONE_ARCHIVE_DAYS}일이 지난 업무 {archivedDoneTasks.length}건은 아카이브에 보관되어 있습니다.</p>
+              <button type="button" onClick={() => setShowDoneArchive(true)}>완료 아카이브 열기 ({archivedDoneTasks.length})</button>
+            </div>
+          </section>
+        ) : <div className="native-kanban-grid" aria-label={`${boardColumns.length}개 업무 상태 열`}>
           {boardColumns.map((column) => {
             const { status, label, english, manual, meaning, manualNote } = column;
             const tasks = taskColumn(status);

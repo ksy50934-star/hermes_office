@@ -10,9 +10,13 @@ test("mobile meeting and Kanban surfaces remain vertically reachable", async () 
 
   assert.match(styles, /\.app-shell > main:has\(\.meeting-lobby-page\)[\s\S]*?overflow-y:\s*auto\s*!important/);
   assert.match(styles, /\.meeting-lobby-page\s*\{[\s\S]*?height:\s*auto\s*!important[\s\S]*?overflow-y:\s*visible\s*!important/);
-  assert.match(styles, /\.native-kanban-grid\s*\{[\s\S]*?min-height:\s*360px\s*!important/);
-  assert.match(styles, /\.native-kanban-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(8,/);
-  assert.doesNotMatch(styles, /native-kanban-grid\s*\{[^}]*repeat\(7,/);
+  assert.match(styles, /\.native-kanban\s*\{[\s\S]*?grid-template-rows:\s*auto auto auto minmax\(0, 1fr\)\s*!important/);
+  assert.match(styles, /\.native-kanban-grid\s*\{[\s\S]*?grid-row:\s*4\s*!important/);
+  assert.match(styles, /\.native-kanban-grid\s*\{[\s\S]*?grid-auto-columns:\s*minmax\(260px, 320px\)\s*!important[\s\S]*?overflow-x:\s*auto\s*!important/);
+  assert.doesNotMatch(styles, /\.native-kanban-grid\s*\{[^}]*grid-template-columns:\s*repeat\(8,\s*minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.kanban-native-ops\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 820px\)[\s\S]*?\.kanban-native-ops\s*\{\s*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /\.kanban-empty-copy h3\s*\{[^}]*word-break:\s*keep-all/);
 });
 
 test("mobile refresh and selected navigation expose explicit state", async () => {

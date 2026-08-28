@@ -19,6 +19,31 @@ test("Kanban exposes touch and keyboard status movement without bypassing move p
   assert.match(source, /!selectedTask\.terminal && boardColumns\.some/);
 });
 
+test("an empty canonical Kanban explains the state instead of drawing eight empty lanes", async () => {
+  const source = await readFile(kanbanPath, "utf8");
+
+  assert.match(source, /const canonicalBoardEmpty = Boolean\(adapter\?\.canonical && loaded && !error && visibleTasks\.length === 0\)/);
+  assert.match(source, /className="kanban-empty-workspace"/);
+  assert.match(source, /아직 등록된 업무가 없습니다/);
+  assert.match(source, /첫 업무 등록하기/);
+  assert.match(source, /titleInputRef\.current\?\.focus\(\)/);
+  assert.match(source, /canonicalBoardEmpty \? \(/);
+});
+
+test("Kanban distinguishes load failure and archive-only states from a truly empty board", async () => {
+  const source = await readFile(kanbanPath, "utf8");
+  const styles = await readFile(stylesPath, "utf8");
+
+  assert.match(source, /const boardLoadFailed = Boolean\(/);
+  assert.match(source, /const canonicalBoardArchiveOnly = Boolean\(/);
+  assert.match(source, /error && visibleTasks\.length > 0/);
+  assert.match(source, /boardLoadFailed \? \(/);
+  assert.match(source, /canonicalBoardArchiveOnly \? \(/);
+  assert.match(source, /완료 아카이브 열기/);
+  assert.match(styles, /\.native-kanban > \.kanban-api-error\s*\{[^}]*grid-row:\s*3/);
+  assert.match(styles, /\.native-kanban > \.empty-state\s*\{[^}]*grid-row:\s*4/);
+});
+
 test("meeting room switches rosters above nine people to a non-overlapping grid", async () => {
   const [source, styles] = await Promise.all([
     readFile(officePath, "utf8"),
