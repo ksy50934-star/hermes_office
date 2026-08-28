@@ -140,7 +140,8 @@ export function createSqliteTelegramSessionReader({
   }
 
   async function query(dbPath, sql, maxBuffer = 1024 * 1024) {
-    const { stdout } = await execFileImpl(sqliteBin, ["-readonly", "-json", dbPath, sql], {
+    const queryOnlySql = `pragma query_only = on; ${sql}`;
+    const { stdout } = await execFileImpl(sqliteBin, ["-json", dbPath, queryOnlySql], {
       env: { PATH: process.env.PATH ?? "" },
       timeout: 15_000,
       maxBuffer,

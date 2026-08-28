@@ -18,13 +18,14 @@ export function createSqliteSessionVerifier({ sqliteBin = "sqlite3", execFileImp
       if (channelOrigin !== "telegram") return { ok: false, code: "SESSION_SOURCE_MISMATCH" };
       const dbPath = path.join(home, "state.db");
       const sql = [
+        "pragma query_only = on;",
         "select id, source, profile_name, expiry_finalized, archived",
         "from sessions",
         `where id = '${hermesSessionId}' limit 1;`,
       ].join(" ");
       let stdout;
       try {
-        ({ stdout } = await execFileImpl(sqliteBin, ["-readonly", "-json", dbPath, sql], {
+        ({ stdout } = await execFileImpl(sqliteBin, ["-json", dbPath, sql], {
           env: { PATH: process.env.PATH ?? "" },
           timeout: 10_000,
           maxBuffer: 64 * 1024,

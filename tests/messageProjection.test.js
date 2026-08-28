@@ -221,6 +221,9 @@ test("SQLite projection filters hidden rows before JSON output and reads a bound
 
   const sql = invocation.args.at(-1);
   assert.equal(invocation.binary, "sqlite3");
+  assert.deepEqual(invocation.args.slice(0, 3), ["-json", "/safe/profile/state.db", sql]);
+  assert.doesNotMatch(invocation.args.join(" "), /-readonly/);
+  assert.match(sql, /^pragma query_only = on;/i);
   assert.match(sql, /role in \('user', 'assistant'\)/);
   assert.match(sql, /tool_call_id is null and tool_calls is null and tool_name is null/);
   assert.match(sql, /typeof\(content\) = 'text' and length\(trim\(content\)\) > 0/);

@@ -2,11 +2,37 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  createSqliteTelegramSessionReader,
   createTelegramSessionDiscoveryRunner,
   TelegramDiscoveryError,
 } from "../connector/telegramSessions.js";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("Telegram discovery allows WAL coordination while every SQLite query stays query-only", async () => {
+  const invocations = [];
+  const reader = createSqliteTelegramSessionReader({
+    homeForProfile: () => "/safe/default",
+    execFileImpl: async (binary, args, options) => {
+      invocations.push({ binary, args, options });
+      if (args.at(-1).includes("table_info")) {
+        return { stdout: JSON.stringify([{ name: "id" }, { name: "source" }]) };
+      }
+      return { stdout: "[]" };
+    },
+  });
+
+  const result = await reader.listSessions("default");
+  assert.equal(result.error, "TELEGRAM_IDENTITY_COLUMNS_MISSING");
+  assert.equal(invocations.length, 2);
+  for (const invocation of invocations) {
+    const sql = invocation.args.at(-1);
+    assert.equal(invocation.binary, "sqlite3");
+    assert.deepEqual(invocation.args.slice(0, 3), ["-json", "/safe/default/state.db", sql]);
+    assert.doesNotMatch(invocation.args.join(" "), /-readonly/);
+    assert.match(sql, /^pragma query_only = on;/i);
+  }
+});
 
 test("conversation archive uses the same canonical web plus Telegram projection", async () => {
   const source = await read("src/cloud/workspaceClient.js");

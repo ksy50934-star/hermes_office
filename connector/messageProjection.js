@@ -202,6 +202,7 @@ export function createSqliteProjectionReader({ homeForProfile, sqliteBin = "sqli
         "display_kind = 'hidden'",
       ].join(" or ");
       const sql = [
+        "pragma query_only = on;",
         "select id, session_id, role, content, timestamp, active, compacted,",
         "tool_call_id, tool_calls, tool_name, display_kind",
         "from messages",
@@ -218,7 +219,7 @@ export function createSqliteProjectionReader({ homeForProfile, sqliteBin = "sqli
       ].join(" ");
       let stdout;
       try {
-        ({ stdout } = await execFileImpl(sqliteBin, ["-readonly", "-json", dbPath, sql], {
+        ({ stdout } = await execFileImpl(sqliteBin, ["-json", dbPath, sql], {
           env: { PATH: process.env.PATH ?? "" },
           maxBuffer: 2 * 1024 * 1024,
           timeout: 15_000,
