@@ -251,15 +251,50 @@ function bindingFailure(error) {
 }
 
 /**
+ * The owner actions on a Telegram binding, and the whole list of them.
+ *
+ * `retry` is `request` under another name — the RPC returns an existing row
+ * untouched and moves a blocked one back to pending. `replace` is `new-session`
+ * under another name. Nothing outside this map is an action, so an unknown
+ * verb — including anything that sounds like verification — is a 400 rather
+ * than something the handler tries to interpret.
+ */
+const OWNER_BINDING_ACTIONS = new Map([
+  ["request", "request"],
+  ["retry", "request"],
+  ["new-session", "new-session"],
+  ["newSession", "new-session"],
+  ["replace", "new-session"],
+  ["cancel", "cancel"],
+]);
+
+/**
  * The owner asking for a Telegram thread to be connected.
  *
  * Everything this route can produce is a `pending` request. There is no field
- * here that names a binding state, and the RPC behind it hard-codes `pending`,
+ * here that names a binding state, and both RPCs behind it hard-code `pending`,
  * so no shape of browser input reaches `verified`. Proof is the connector's job
  * and it happens on a different route with a different credential.
+ *
+ * The rotation the owner performs is two calls through here and one through the
+ * connector's route:
+ *
+ *   1. `cancel` — the current binding becomes `unbound`. Idempotent: cancelling
+ *      an already-unbound binding reports `alreadyUnbound` and changes nothing.
+ *   2. `new-session` — the newly eligible Hermes session is requested for the
+ *      *same* conversation. This creates a second, `pending` binding and leaves
+ *      the unbound one exactly as it is. Idempotent: re-firing it for the
+ *      session already requested returns that row instead of stacking another.
+ *   3. The connector verifies. Not reachable from here at all.
+ *
+ * No path through this handler deletes or rewrites a message.
  */
 export async function handleConversationBinding({ auth, body, store }) {
-  const action = String(body?.action ?? "request").trim();
+  const requested = String(body?.action ?? "request").trim();
+  const action = OWNER_BINDING_ACTIONS.get(requested);
+  if (!action) {
+    return failure(400, "UNSUPPORTED_ACTION", `'${requested}' is not a binding action.`);
+  }
 
   if (action === "cancel") {
     const bindingId = identityText(body?.bindingId, 64);
@@ -270,18 +305,12 @@ export async function handleConversationBinding({ auth, body, store }) {
         bindingId,
         reason: identityText(body?.reason, 300) || "owner disconnected the Telegram binding",
       });
-      return success({ ok: true, ...result });
+      return success({ ok: true, action, ...result });
     } catch (error) {
       const mapped = bindingFailure(error);
       if (!mapped) throw error;
       return mapped;
     }
-  }
-
-  // `retry` and `request` are the same operation: the RPC returns an existing
-  // row untouched, and moves a blocked or cancelled one back to pending.
-  if (action !== "request" && action !== "retry") {
-    return failure(400, "UNSUPPORTED_ACTION", `'${action}' is not a binding action.`);
   }
 
   const conversationId = identityText(body?.conversationId, 64);
@@ -301,8 +330,16 @@ export async function handleConversationBinding({ auth, body, store }) {
     return failure(400, "INCOMPLETE_BINDING_IDENTITY", "The Telegram session identity is incomplete.");
   }
 
+  // Identical arguments for both: what differs is whether an existing live
+  // binding may be reused. `request` reuses it; `new-session` refuses to
+  // overwrite one and requires the owner to cancel first, which is what keeps
+  // the old session's binding readable as `unbound` afterwards.
+  const call = action === "new-session"
+    ? store.replaceConversationBinding.bind(store)
+    : store.requestConversationBinding.bind(store);
+
   try {
-    const result = await store.requestConversationBinding({
+    const result = await call({
       ownerId: auth.ownerId,
       conversationId,
       channel,
@@ -311,7 +348,7 @@ export async function handleConversationBinding({ auth, body, store }) {
       hermesSessionId,
       clientRequestId,
     });
-    return success({ ok: true, ...result });
+    return success({ ok: true, action, ...result });
   } catch (error) {
     const mapped = bindingFailure(error);
     if (!mapped) throw error;

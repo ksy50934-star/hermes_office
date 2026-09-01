@@ -251,7 +251,9 @@ function TelegramBridgePanel({ bridge, discovery, onConnect, onRetry, onDisconne
           <>
             {discovery.detail ? <p className="bibi-bridge-notice">{discovery.detail}</p> : null}
             <ul className="bibi-bridge-sessions">
-              {discovery.sessions.map((session) => {
+              {discovery.sessions
+                .filter((session) => session.hermes_session_id !== bridge.hermesSessionId)
+                .map((session) => {
                 const described = describeEligibleSession(session);
                 return (
                   <li key={described.id}>
@@ -1453,6 +1455,14 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
   const handleConnectTelegram = useCallback(async (session) => {
     const conversationId = conversationIdRef.current;
     if (!conversationId || !session?.hermes_session_id) return;
+    // A conversation that has been through a disconnect already has a binding
+    // row, and it is `unbound`. Asking for the next session there is a rotation,
+    // so it is sent as one: the API refuses to overwrite a live binding under
+    // that action, which is what stops a half-finished disconnect from being
+    // silently papered over. A conversation with no binding at all is a plain
+    // first request.
+    const current = binding.binding;
+    const action = current ? "new-session" : "request";
     setBusy(true);
     try {
       await requestConversationBinding({
@@ -1460,7 +1470,10 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
         hermesSessionId: session.hermes_session_id,
         channelAccountId: session.channel_account_id,
         externalConversationId: session.external_conversation_id,
+        action,
       });
+      // Read back rather than assume. What lands here is `pending`; the panel
+      // says so, and only the connector can move it on.
       setBinding(await loadConversationBinding(conversationId));
       setError("");
     } catch (connectError) {
@@ -1468,7 +1481,7 @@ export default function BibiWorkspace({ surface = "ceo", onAuthGateChange, contr
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [binding.binding]);
 
   /** Retry a refused verification. Same request, so the same row is reused. */
   const handleRetryTelegram = useCallback(async () => {

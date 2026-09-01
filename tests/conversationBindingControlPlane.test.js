@@ -43,6 +43,7 @@ function storeDouble(overrides = {}) {
   return {
     calls,
     requestConversationBinding: record("requestConversationBinding"),
+    replaceConversationBinding: record("replaceConversationBinding"),
     cancelConversationBinding: record("cancelConversationBinding"),
     verifyConversationBinding: record("verifyConversationBinding"),
     failConversationBinding: record("failConversationBinding"),
@@ -179,6 +180,66 @@ test("retry is the same request against the same row", async () => {
   assert.equal(result.status, 200);
   assert.equal(result.body.retried, true);
   assert.equal(result.body.bindingState, "pending");
+});
+
+test("new-session requests a pending replacement for the same owner conversation", async () => {
+  const replacement = "66666666-6666-6666-6666-666666666666";
+  const store = storeDouble({
+    replaceConversationBinding: {
+      bindingId: replacement,
+      bindingState: "pending",
+      duplicate: false,
+      previousBindingId: BINDING,
+      previousBindingState: "unbound",
+    },
+  });
+
+  const result = await handleConversationBinding({
+    auth: { ownerId: OWNER },
+    body: { ...validRequest, action: "new-session", hermesSessionId: "sess-new" },
+    store,
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.action, "new-session");
+  assert.equal(result.body.bindingState, "pending");
+  assert.equal(result.body.previousBindingState, "unbound");
+  assert.deepEqual(store.calls, [{
+    name: "replaceConversationBinding",
+    input: {
+      ownerId: OWNER,
+      conversationId: CONVERSATION,
+      channel: "telegram",
+      channelAccountId: "acct-1",
+      externalConversationId: "chat-9",
+      hermesSessionId: "sess-new",
+      clientRequestId: "req-1",
+    },
+  }]);
+});
+
+test("new-session cannot smuggle verification fields to the replacement store", async () => {
+  const store = storeDouble({
+    replaceConversationBinding: { bindingId: BINDING, bindingState: "pending", duplicate: false },
+  });
+
+  await handleConversationBinding({
+    auth: { ownerId: OWNER },
+    body: {
+      ...validRequest,
+      action: "new-session",
+      bindingState: "verified",
+      verified: true,
+      verifiedAt: "2026-09-01T00:00:00.000Z",
+      verifiedByNodeId: NODE,
+    },
+    store,
+  });
+
+  const [call] = store.calls;
+  for (const forbidden of ["bindingState", "verified", "verifiedAt", "verifiedByNodeId"]) {
+    assert.equal(call.input[forbidden], undefined, `${forbidden} must not reach the replacement RPC`);
+  }
 });
 
 test("cancelling is owner scoped and idempotent", async () => {

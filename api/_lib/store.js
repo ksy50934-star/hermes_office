@@ -38,6 +38,9 @@ function mapBindingError(error) {
   const mapped = new Error(message);
   if (/no_data_found|not found for owner/i.test(message)) mapped.code = "BINDING_NOT_FOUND";
   else if (/already bound to another conversation/i.test(message)) mapped.code = "BINDING_CONFLICT";
+  // Rotation is ordered: cancel, then request. Asking for a new session while a
+  // live binding is still in place is a conflict, not a silent overwrite.
+  else if (/must be cancelled before a new session/i.test(message)) mapped.code = "BINDING_CONFLICT";
   else if (/identity mismatch/i.test(message)) mapped.code = "BINDING_IDENTITY_MISMATCH";
   else if (/requires the authenticated connector|may only be created pending|requires connector proof/i.test(message)) {
     mapped.code = "BINDING_VERIFICATION_FORBIDDEN";
@@ -237,6 +240,39 @@ export function createWorkspaceStore(supabase) {
         bindingState: row?.binding_state ?? null,
         duplicate: Boolean(row?.duplicate),
         retried: Boolean(row?.retried),
+      };
+    },
+
+    /**
+     * Rotate a conversation onto a different Hermes session.
+     *
+     * The cancelled binding is left exactly where it is: this RPC inserts a new
+     * `pending` row and never rewrites the old one, so the record of which
+     * session was unbound survives the rotation. Like the request above, there
+     * is no argument here that could make anything verified.
+     */
+    async replaceConversationBinding({
+      ownerId, conversationId, channel, channelAccountId,
+      externalConversationId, hermesSessionId, clientRequestId,
+    }) {
+      const { data, error } = await supabase.rpc("bibi_replace_conversation_binding", {
+        p_owner_id: ownerId,
+        p_conversation_id: conversationId,
+        p_channel: channel,
+        p_channel_account_id: channelAccountId,
+        p_external_conversation_id: externalConversationId,
+        p_hermes_session_id: hermesSessionId,
+        p_client_request_id: clientRequestId ?? null,
+      });
+      if (error) throw mapBindingError(error);
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        bindingId: row?.binding_id ?? null,
+        bindingState: row?.binding_state ?? null,
+        duplicate: Boolean(row?.duplicate),
+        replaced: !row?.duplicate,
+        previousBindingId: row?.previous_binding_id ?? null,
+        previousBindingState: row?.previous_binding_state ?? null,
       };
     },
 

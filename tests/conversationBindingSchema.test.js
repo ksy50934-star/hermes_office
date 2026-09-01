@@ -18,6 +18,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { PGlite } from "@electric-sql/pglite";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const migrations = path.join(root, "supabase", "migrations");
@@ -27,6 +28,14 @@ async function onboardingMigration() {
     .filter((name) => name.endsWith("_bibi_conversation_binding_onboarding.sql"))
     .sort();
   assert.equal(names.length, 1, "one forward-only binding onboarding migration is required");
+  return readFile(path.join(migrations, names[0]), "utf8");
+}
+
+async function rotationMigration() {
+  const names = (await readdir(migrations))
+    .filter((name) => name.endsWith("_bibi_conversation_binding_rotation.sql"))
+    .sort();
+  assert.equal(names.length, 1, "one forward-only binding rotation migration is required");
   return readFile(path.join(migrations, names[0]), "utf8");
 }
 
@@ -173,6 +182,165 @@ test("disconnecting unbinds a channel and deletes no canonical message", async (
   assert.doesNotMatch(cancelBody, /public\.messages/i);
   // The conversation stops claiming a sync it no longer has.
   assert.match(cancelBody, /update public\.conversations[\s\S]*?sync_status = 'local-only'/i);
+});
+
+test("rotation keeps the old binding as history and creates a separate pending binding", async () => {
+  const sql = await rotationMigration();
+  const replaceBody = sql.slice(
+    sql.indexOf("create or replace function public.bibi_replace_conversation_binding"),
+    sql.indexOf("revoke all on function public.bibi_replace_conversation_binding"),
+  ).replace(/--[^\n]*/g, "");
+
+  assert.match(sql, /conversation_bindings_live_conversation_channel_idx[\s\S]*?where binding_state <> 'unbound'/i);
+  assert.match(sql, /array_agg\(att\.attname::text order by att\.attname::text\)/i);
+  assert.match(sql, /request is only valid for the first binding; use a replacement session/i);
+  assert.match(replaceBody, /pg_advisory_xact_lock\(pg_catalog\.hashtextextended\([\s\S]*?'bibi-binding:'[\s\S]*?p_conversation_id::text[\s\S]*?p_channel/i);
+  assert.doesNotMatch(replaceBody, /from public\.conversations[\s\S]{0,200}?for update/i);
+  assert.match(replaceBody, /(?:cb\.)?binding_state = 'unbound'[\s\S]*?order by (?:cb\.)?cancelled_at desc/i);
+  assert.match(replaceBody, /if v_previous\.id is null then[\s\S]*?must be cancelled before a new session is requested/i);
+  assert.match(replaceBody, /v_previous\.hermes_session_id = btrim\(p_hermes_session_id\)[\s\S]*?replacement must name a different Hermes session/i);
+  assert.match(replaceBody, /binding_state <> 'unbound'[\s\S]*?for update/i);
+  assert.match(replaceBody, /insert into public\.conversation_bindings[\s\S]*?'pending', 'user'/i);
+  assert.match(replaceBody, /client request id was already used for a different binding request/i);
+  assert.doesNotMatch(replaceBody, /update public\.conversation_bindings/i);
+  assert.doesNotMatch(replaceBody, /delete from/i);
+});
+
+test("rotation migration executes twice and preserves the old row at runtime", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    create role anon; create role authenticated; create role service_role;
+    create table public.conversations (
+      id uuid primary key, owner_id uuid not null, profile_id text not null,
+      execution_profile_id text not null, sync_status text default 'local-only',
+      sync_error text, telegram_mirroring_enabled boolean default false,
+      updated_at timestamptz not null default now()
+    );
+    create table public.conversation_bindings (
+      id uuid primary key default gen_random_uuid(), owner_id uuid not null,
+      conversation_id uuid not null, organization_profile_id text not null,
+      execution_profile_id text not null, channel text not null,
+      channel_account_id text not null, external_conversation_id text not null,
+      hermes_session_id text not null, binding_state text not null default 'pending',
+      initiation_source text not null, client_request_id text,
+      request_count integer not null default 1, verified_at timestamptz,
+      verified_by_node_id uuid, verification_code text, verification_error text,
+      cancelled_at timestamptz, created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      constraint old_channel_unique unique(owner_id, channel, channel_account_id, external_conversation_id),
+      constraint old_conversation_unique unique(conversation_id, channel),
+      constraint old_session_unique unique(owner_id, execution_profile_id, hermes_session_id),
+      constraint old_request_unique unique(owner_id, client_request_id)
+    );
+    create table public.conversation_audit_events (
+      id uuid primary key default gen_random_uuid(), owner_id uuid not null,
+      conversation_id uuid not null, binding_id uuid, event_id text not null,
+      event_type text not null, organization_profile_id text,
+      execution_profile_id text, hermes_session_id text,
+      payload jsonb not null default '{}'::jsonb, unique(owner_id, event_id)
+    );
+  `);
+  const sql = await rotationMigration();
+  await db.exec(sql);
+  await db.exec(sql);
+
+  const owner = "11111111-1111-1111-1111-111111111111";
+  const conversation = "22222222-2222-2222-2222-222222222222";
+  await db.exec(`
+    insert into conversations(id, owner_id, profile_id, execution_profile_id)
+    values ('${conversation}', '${owner}', 'bibi-02', 'bibi-02');
+    insert into conversation_bindings(
+      id, owner_id, conversation_id, organization_profile_id,
+      execution_profile_id, channel, channel_account_id,
+      external_conversation_id, hermes_session_id, binding_state,
+      initiation_source, cancelled_at, client_request_id
+    ) values (
+      '33333333-3333-3333-3333-333333333333', '${owner}', '${conversation}',
+      'bibi-02', 'bibi-02', 'telegram', 'acct', 'chat', 'old-session',
+      'unbound', 'user', now(), 'old-request'
+    );
+  `);
+
+  await assert.rejects(
+    db.query(`select * from public.bibi_request_conversation_binding(
+      '${owner}', '${conversation}', 'telegram', 'acct', 'chat', 'old-session', 'bypass-request'
+    )`),
+    /request is only valid for the first binding; use a replacement session/i,
+  );
+
+  await assert.rejects(
+    db.query(`select * from public.bibi_replace_conversation_binding(
+      '${owner}', '${conversation}', 'telegram', 'acct', 'chat', 'old-session', 'same-session-request'
+    )`),
+    /replacement must name a different Hermes session/i,
+  );
+
+  const first = await db.query(`select * from public.bibi_replace_conversation_binding(
+    '${owner}', '${conversation}', 'telegram', 'acct', 'chat', 'new-session', 'new-request'
+  )`);
+  const duplicate = await db.query(`select * from public.bibi_replace_conversation_binding(
+    '${owner}', '${conversation}', 'telegram', 'acct', 'chat', 'new-session', 'new-request'
+  )`);
+  const rows = await db.query(`select hermes_session_id, binding_state
+    from conversation_bindings order by hermes_session_id`);
+  const constraints = await db.query(`select conname from pg_constraint
+    where conrelid = 'public.conversation_bindings'::regclass and contype = 'u'`);
+
+  assert.equal(first.rows[0].binding_state, "pending");
+  assert.equal(first.rows[0].previous_binding_id, "33333333-3333-3333-3333-333333333333");
+  assert.equal(duplicate.rows[0].binding_id, first.rows[0].binding_id);
+  assert.equal(duplicate.rows[0].duplicate, true);
+  assert.deepEqual(rows.rows, [
+    { hermes_session_id: "new-session", binding_state: "pending" },
+    { hermes_session_id: "old-session", binding_state: "unbound" },
+  ]);
+  assert.deepEqual(
+    constraints.rows.map((row) => row.conname).sort(),
+    ["old_request_unique"],
+  );
+});
+
+test("rotation cannot verify or modify existing Office messages", async () => {
+  const sql = await rotationMigration();
+  const replaceBody = sql.slice(
+    sql.indexOf("create or replace function public.bibi_replace_conversation_binding"),
+    sql.indexOf("revoke all on function public.bibi_replace_conversation_binding"),
+  ).replace(/--[^\n]*/g, "");
+
+  assert.doesNotMatch(replaceBody, /set_config\('bibi\.binding_verification'/i);
+  assert.doesNotMatch(replaceBody, /'verified'/i);
+  assert.doesNotMatch(replaceBody, /public\.messages|projected_messages/i);
+  for (const role of ["public", "anon", "authenticated"]) {
+    assert.match(
+      sql,
+      new RegExp(`revoke all on function public\\.bibi_replace_conversation_binding\\(uuid, uuid, text, text, text, text, text\\) from ${role};`, "i"),
+    );
+  }
+  assert.match(sql, /grant execute on function public\.bibi_replace_conversation_binding\(uuid, uuid, text, text, text, text, text\) to service_role;/i);
+});
+
+test("the browser rotation contract is cancel, same-conversation new-session, then readback", async () => {
+  const [workspace, client] = await Promise.all([
+    readFile(path.join(root, "src/BibiWorkspace.jsx"), "utf8"),
+    readFile(path.join(root, "src/cloud/workspaceClient.js"), "utf8"),
+  ]);
+  const disconnect = workspace.slice(
+    workspace.indexOf("const handleDisconnectTelegram"),
+    workspace.indexOf("const handleFile"),
+  );
+  const connect = workspace.slice(
+    workspace.indexOf("const handleConnectTelegram"),
+    workspace.indexOf("const handleRetryTelegram"),
+  );
+
+  assert.match(disconnect, /cancelConversationBinding\(/);
+  assert.match(disconnect, /refreshConversation\(conversationId\)/);
+  assert.match(connect, /const conversationId = conversationIdRef\.current/);
+  assert.match(connect, /action = current \? "new-session" : "request"/);
+  assert.match(connect, /setBinding\(await loadConversationBinding\(conversationId\)\)/);
+  assert.match(workspace, /filter\(\(session\) => session\.hermes_session_id !== bridge\.hermesSessionId\)/);
+  assert.match(client, /OWNER_BINDING_ACTIONS = Object\.freeze\(\["request", "retry", "new-session"\]\)/);
+  assert.doesNotMatch(client, /OWNER_BINDING_ACTIONS[^\n]*verified/);
 });
 
 test("every binding lifecycle change lands in the append-only audit log", async () => {

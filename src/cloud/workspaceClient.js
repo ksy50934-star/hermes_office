@@ -357,12 +357,26 @@ export async function loadTelegramDiscovery() {
 }
 
 /**
+ * The three things the browser is allowed to ask for.
+ *
+ * `request` connects a conversation that has no live binding. `retry` re-asks
+ * for the one it already has after the connector refused it. `new-session`
+ * rotates onto a different Hermes session, and is only legal once the current
+ * binding has been cancelled.
+ *
+ * There is deliberately no fourth entry. Verification is a connector action on
+ * a connector route with a connector credential, and this list is where that
+ * stops being expressible from here.
+ */
+export const OWNER_BINDING_ACTIONS = Object.freeze(["request", "retry", "new-session"]);
+
+/**
  * Ask for a Telegram session to be connected to this conversation.
  *
  * This creates a request, not a connection. The route behind it can only write
  * `pending`, and the connector is the only thing that can move it further, so
- * nothing the browser sends here — no field, no value, no retry — produces a
- * verified binding.
+ * nothing the browser sends here — no field, no value, no retry, no rotation —
+ * produces a verified binding.
  *
  * `clientRequestId` is the idempotency key: a double click or a retry after a
  * dropped response resolves to the original request instead of racing the
@@ -376,9 +390,14 @@ export async function requestConversationBinding({
   clientRequestId = randomId(),
   action = "request",
 }) {
+  if (!OWNER_BINDING_ACTIONS.includes(action)) {
+    throw new Error(`'${action}'은(는) 브라우저가 요청할 수 있는 연결 동작이 아닙니다.`);
+  }
   const response = await fetch("/api/chat/binding", {
     method: "POST",
     headers: await authorizedHeaders(),
+    // Exactly these fields. Nothing that names a binding state is sent, because
+    // there is nothing the browser could send that would be believed.
     body: JSON.stringify({
       action,
       conversationId,
@@ -399,6 +418,11 @@ export async function requestConversationBinding({
 /**
  * Disconnect a binding. This unbinds a channel; it deletes nothing. Every
  * message already projected into the conversation stays exactly where it is.
+ *
+ * It is also the first half of a rotation: cancel, then `requestConversationBinding`
+ * with `action: "new-session"` for the session the connector newly reported.
+ * The cancelled binding stays readable as `unbound`; the new one starts
+ * `pending` and waits for the connector.
  */
 export async function cancelConversationBinding({ bindingId, reason = "" }) {
   const response = await fetch("/api/chat/binding", {
