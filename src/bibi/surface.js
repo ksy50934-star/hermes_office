@@ -11,11 +11,13 @@
 export const BIBI_VIEW_ID = "ceo";
 
 /**
- * The CEO landing is the only view whose renderer is BibiWorkspace itself.
- * Other Bibi views keep the upstream specialist renderer and replace only its
+ * The CEO landing and direct-chat route are rendered by BibiWorkspace itself.
+ * The chat route must use that renderer because it owns the conversation
+ * binding, connector discovery, checkpoint readback, and Telegram bridge panel.
+ * Other Bibi views keep the upstream specialist renderer and replace only their
  * data transport with the authenticated cloud contract.
  */
-export const BIBI_SURFACE_IDS = Object.freeze(new Set([BIBI_VIEW_ID]));
+export const BIBI_SURFACE_IDS = Object.freeze(new Set([BIBI_VIEW_ID, "chat"]));
 
 /** Views protected by the Bibi owner session and backed by Bibi cloud data. */
 export const BIBI_CLOUD_VIEW_IDS = Object.freeze(new Set([

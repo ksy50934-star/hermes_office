@@ -20,6 +20,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { BIBI_VIEW_ID, isBibiCloudView, isBibiSurface } from "../src/bibi/surface.js";
+import {
+  BRIDGE_STATE,
+  DISCOVERY_STATE,
+  describeConversationBridge,
+} from "../src/bibi/telegramBridge.js";
 import { OFFICE_BRAND_MARK_SRC } from "../src/branding.js";
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -85,6 +90,74 @@ test("the Bibi surface is identified by one shared predicate", () => {
   for (const other of ["", null, undefined]) {
     assert.equal(isBibiCloudView(other), false, `${String(other)} is not a cloud route`);
     assert.equal(isBibiSurface(other), false, `${String(other)} is not the CEO renderer`);
+  }
+});
+
+test("the owner chat surface renders the verified Telegram bridge and its disconnect action", async () => {
+  const bridge = describeConversationBridge({
+    conversation: {
+      id: "conversation-1",
+      origin_channel: "web",
+      sync_status: "synced",
+      telegram_mirroring_enabled: false,
+    },
+    binding: {
+      id: "binding-old",
+      binding_state: "verified",
+      hermes_session_id: "session-old",
+      channel_account_id: "telegram-account",
+      external_conversation_id: "telegram-chat",
+    },
+    connectorHealth: { state: "online", label: "ONLINE" },
+    discovery: {
+      state: DISCOVERY_STATE.READY,
+      detail: null,
+      incompleteCount: 0,
+      sessions: [{
+        hermes_session_id: "20260901_173509_8daf1f41",
+        identity_complete: true,
+        session_state: "active",
+      }],
+    },
+  });
+
+  assert.equal(bridge.state, BRIDGE_STATE.VERIFIED);
+  assert.equal(bridge.canDisconnect, true);
+  assert.equal(isBibiSurface("chat"), true, "the chat route must mount BibiWorkspace rather than the bridge-less direct-chat renderer");
+
+  const [workspace, app] = await Promise.all([
+    read("src/BibiWorkspace.jsx"),
+    read("src/App.jsx"),
+  ]);
+  assert.match(workspace, /<TelegramBridgePanel/);
+  assert.match(workspace, /bridge\.canDisconnect[\s\S]*?연결 해제/);
+  assert.match(app, /const specialistSurfaceReady = !bibiSurface/);
+  assert.match(app, /specialistSurfaceReady && bibiCloudView && view === "chat"/);
+});
+
+test("verified bridge rendering tolerates the current conversation readback shapes", () => {
+  for (const conversation of [
+    null,
+    {},
+    { id: "conversation-1" },
+    {
+      id: "conversation-1",
+      origin_channel: "telegram",
+      sync_status: "synced",
+      sync_error: null,
+      telegram_mirroring_enabled: false,
+    },
+  ]) {
+    const bridge = describeConversationBridge({
+      conversation,
+      binding: {
+        id: "binding-old",
+        binding_state: "verified",
+        hermes_session_id: "session-old",
+      },
+    });
+    assert.equal(bridge.canDisconnect, true);
+    assert.ok(bridge.label && bridge.detail && bridge.projectionLabel);
   }
 });
 
