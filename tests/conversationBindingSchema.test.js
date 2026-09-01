@@ -39,6 +39,14 @@ async function rotationMigration() {
   return readFile(path.join(migrations, names[0]), "utf8");
 }
 
+async function profileScopedBindingMigration() {
+  const names = (await readdir(migrations))
+    .filter((name) => name.endsWith("_bibi_profile_scoped_telegram_binding.sql"))
+    .sort();
+  assert.equal(names.length, 1, "one forward-only profile-scoped binding migration is required");
+  return readFile(path.join(migrations, names[0]), "utf8");
+}
+
 /** Every function this migration adds, with the argument list its grants name. */
 const FUNCTIONS = [
   ["bibi_request_conversation_binding", "uuid, uuid, text, text, text, text, text"],
@@ -243,6 +251,9 @@ test("rotation migration executes twice and preserves the old row at runtime", a
   const sql = await rotationMigration();
   await db.exec(sql);
   await db.exec(sql);
+  const profileSql = await profileScopedBindingMigration();
+  await db.exec(profileSql);
+  await db.exec(profileSql);
 
   const owner = "11111111-1111-1111-1111-111111111111";
   const conversation = "22222222-2222-2222-2222-222222222222";
@@ -297,6 +308,26 @@ test("rotation migration executes twice and preserves the old row at runtime", a
   assert.deepEqual(
     constraints.rows.map((row) => row.conname).sort(),
     ["old_request_unique"],
+  );
+
+  const researchConversation = "44444444-4444-4444-4444-444444444444";
+  const duplicateResearchConversation = "55555555-5555-5555-5555-555555555555";
+  await db.exec(`
+    insert into conversations(id, owner_id, profile_id, execution_profile_id)
+    values
+      ('${researchConversation}', '${owner}', 'bibi-14', 'bibi-14'),
+      ('${duplicateResearchConversation}', '${owner}', 'bibi-14', 'bibi-14');
+  `);
+  const research = await db.query(`select * from public.bibi_request_conversation_binding(
+    '${owner}', '${researchConversation}', 'telegram', 'acct', 'chat', 'research-session', 'research-request'
+  )`);
+  assert.equal(research.rows[0].binding_state, "pending", "the same Telegram DM may bind once per execution profile");
+  await assert.rejects(
+    db.query(`select * from public.bibi_request_conversation_binding(
+      '${owner}', '${duplicateResearchConversation}', 'telegram', 'acct', 'chat', 'research-session-2', 'research-conflict'
+    )`),
+    /this Telegram conversation is already bound to another conversation/i,
+    "the same profile still cannot give one Telegram DM two Office conversations",
   );
 });
 
